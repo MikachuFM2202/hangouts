@@ -1,0 +1,9 @@
+{
+  "name": "hangouts",
+  "short_name": "hangouts",
+  "start_url": "./#plans",
+  "display": "standalone",
+  "background_color": "#15111a",
+  "theme_color": "#ff6f91",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
