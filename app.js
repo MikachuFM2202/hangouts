@@ -102,9 +102,8 @@ function notesCard() {
   const latest = notes().find(n => n.by !== me()) || notes()[0];
   return `
   <div class="notes-card">
-    <h2 class="col-title">💌 Love notes</h2>
-    ${latest ? `<p class="tg-quote">“${esc(latest.text)}”</p><p class="muted small">From ${esc(nameOf(latest.by))}, ${ago(latest.at)}</p>` : `<p class="muted">Leave a little note. It shows up here on ${esc(nameOf(other(me())))}’s phone.</p>`}
-    <div class="tg-note-btns"><button class="btn small primary" data-act="note-new">Leave a note</button>${notes().length ? `<button class="btn small ghost" data-act="note-all">All notes (${notes().length})</button>` : ''}</div>
+    <span class="nc-text">${latest ? `💌 <span class="tg-quote">“${esc(latest.text)}”</span> <span class="muted small">— ${esc(nameOf(latest.by))}</span>` : '<span class="muted">💌 No love notes yet</span>'}</span>
+    <span class="tg-note-btns"><button class="btn small primary" data-act="note-new">Write</button>${notes().length ? `<button class="btn small ghost" data-act="note-all">All (${notes().length})</button>` : ''}</span>
   </div>`;
 }
 
@@ -194,6 +193,7 @@ function route() {
   const h = location.hash.slice(1);
   tab = TABS.includes(h) ? h : h === 'archive' ? 'memories' : 'ask';
   ['#modal', '#lightbox'].forEach(s => $(s).open && $(s).close());
+  document.documentElement.classList.toggle('noscroll', tab === 'ask'); // the front page is one fixed screen
   render(true);
   $('#view').focus({ preventScroll: true });
   scrollTo(0, 0);
@@ -278,9 +278,9 @@ function viewAsk() {
     </div>
     ${notesCard()}
     <div class="ask-foot">
-      <p class="tos">By saying yes you agree to the <button class="linkish" data-act="tos">Terms of Cuddles</button>.</p>
-      <button class="btn ghost small" data-act="copy-invite">🔗 Send this page</button>
-      <a class="btn ghost small" href="#plans">💌 Ask about a specific plan</a>
+      <button class="linkish" data-act="tos">Terms of Cuddles</button><span aria-hidden="true">·</span>
+      <button class="linkish" data-act="copy-invite">Send link</button><span aria-hidden="true">·</span>
+      <a class="linkish" href="#plans">Ask about a plan</a>
     </div>
   </section>`;
 }
@@ -644,8 +644,11 @@ function saveIdea({ emoji, title, notes, link, place }) {
   S.put('date:' + S.uid(), { emoji, title, notes, link, place, status: 'idea', by: me(), n: nextN(), photos: [] }, `feat(ideas): save "${title}" ${emoji}`);
   toast('💡 Saved to Plans › Ideas for later');
 }
-let ideaCat = 'all', ideaCost = 'all', ideaDist = 'all';
-const ideaFromRow = ([emoji, title, tip, , , place]) => ({ emoji, title, notes: tip, place: place && !/ (workshop|shop|court|gym|room|arcade|bowling|cinema|reflexology|house) /.test(` ${place} `) ? place : undefined });
+let ideaCat = 'hot', ideaCost = 'all', ideaDist = 'all';
+// Places starting lowercase are map searches ("padel court Kuala Lumpur"), not a specific spot.
+const isSearch = place => /^[a-z]/.test(place);
+const ideaFromRow = ([emoji, title, tip, , , place]) => ({ emoji, title, notes: tip, place: place && !isSearch(place) ? place : undefined });
+let ideaQuery = '';
 const distBand = mins => (mins === 0 ? 'home' : mins <= 30 ? 'near' : 'far');
 function viewIdeas() {
   const saved = savedTitles();
@@ -653,35 +656,41 @@ function viewIdeas() {
   return `
   <section class="ideas">
     <div class="section-head">
-      <div><h1>Date ideas</h1><p class="muted">${DATE_IDEAS.length} daytime ideas within an hour of ${esc(HOME)}, all under RM150 for the two of you. Prices are rough guides with MyKad.</p></div>
+      <div><h1>Date ideas</h1><p class="muted">${DATE_IDEAS.length} daytime ideas within an hour of ${esc(HOME)}, all under RM150 for the two of you, including ${DATE_IDEAS.filter(r => r[7]).length} 🔥 trending ones. Prices are rough guides with MyKad.</p></div>
       <div class="head-actions"><button class="btn primary" data-act="spin">🎲 Surprise me</button></div>
     </div>
     <div class="filters">
-      <div class="chips" role="group" aria-label="Type">${chip('icat', 'all', 'All', ideaCat)}${Object.entries(IDEA_CATS).map(([k, l]) => chip('icat', k, l, ideaCat)).join('')}</div>
+      <input class="search" type="search" id="ideaSearch" placeholder="Search ideas… (matcha, hike, Bangsar)" value="${esc(ideaQuery)}" aria-label="Search ideas">
+      <div class="chips" role="group" aria-label="Type">${chip('icat', 'hot', '🔥 Trending', ideaCat)}${chip('icat', 'all', 'All', ideaCat)}${Object.entries(IDEA_CATS).map(([k, l]) => chip('icat', k, l, ideaCat)).join('')}</div>
       <div class="chips" role="group" aria-label="Budget for two">${chip('icost', 'all', 'Any budget', ideaCost)}${COST.map((l, i) => chip('icost', String(i), l, ideaCost)).join('')}</div>
       <div class="chips" role="group" aria-label="Distance">${chip('idist', 'all', 'Any distance', ideaDist)}${chip('idist', 'home', '🏠 At home', ideaDist)}${chip('idist', 'near', '🚗 Up to 30 min', ideaDist)}${chip('idist', 'far', '🚗 30–60 min', ideaDist)}</div>
     </div>
-    <div class="idea-grid">${DATE_IDEAS.map(([e, t, tip, cat, cost, place, mins], i) => `
-      <article class="idea" data-cat="${cat}" data-cost="${cost}" data-dist="${distBand(mins)}">
+    <div class="idea-grid">${DATE_IDEAS.map(([e, t, tip, cat, cost, place, mins, hot], i) => `
+      <article class="idea${hot ? ' hot' : ''}" data-cat="${cat}" data-cost="${cost}" data-dist="${distBand(mins)}" data-hot="${hot ? 1 : 0}" data-text="${esc([t, tip, place, IDEA_CATS[cat]].join(' ').toLowerCase())}">
         <div class="i-emoji">${e}</div>
         <div class="i-body">
           <h3>${esc(t)}</h3>
           <p>${esc(tip)}</p>
-          ${place ? `<div class="i-where"><a href="https://www.google.com/maps/search/${encodeURIComponent(place)}" target="_blank" rel="noopener">📍 ${esc(place.replace(/,? Kuala Lumpur$/, ''))}</a> · ~${mins} min drive</div>` : ''}
-          <div class="i-tags"><span class="pill">${IDEA_CATS[cat]}</span><span class="pill">${COST[cost]}${cost ? ' for two' : ''}</span></div>
+          ${place ? `<div class="i-where"><a href="https://www.google.com/maps/search/${encodeURIComponent(place)}" target="_blank" rel="noopener">📍 ${isSearch(place) ? 'Find nearby' : esc(place.replace(/,? Kuala Lumpur$/, ''))}</a> · ~${mins} min drive</div>` : ''}
+          <div class="i-tags">${hot ? '<span class="pill hot-pill">🔥 Trending</span>' : ''}<span class="pill">${IDEA_CATS[cat]}</span><span class="pill">${COST[cost]}${cost ? ' for two' : ''}</span></div>
         </div>
         <button class="btn small ${saved.has(t.toLowerCase()) ? 'saved' : ''}" data-act="save-idea" data-i="${i}">${saved.has(t.toLowerCase()) ? '✓ Saved' : '+ Save'}</button>
       </article>`).join('')}</div>
-    <p class="empty" id="noIdeas" hidden>Nothing matches all three filters. Try loosening one.</p>
+    <p class="empty" id="noIdeas" hidden>Nothing matches. Try another search or loosen a filter.</p>
   </section>`;
 }
 function bindIdeas(v) {
-  let hits = 0;
-  $$('.idea', v).forEach(el => {
-    const on = (ideaCat === 'all' || el.dataset.cat === ideaCat) && (ideaCost === 'all' || el.dataset.cost === ideaCost) && (ideaDist === 'all' || el.dataset.dist === ideaDist);
-    el.hidden = !on; hits += on;
-  });
-  $('#noIdeas', v).hidden = hits > 0;
+  const filter = () => {
+    const q = ideaQuery.trim().toLowerCase(); let hits = 0;
+    $$('.idea', v).forEach(el => {
+      const catOk = ideaCat === 'all' || (ideaCat === 'hot' ? el.dataset.hot === '1' : el.dataset.cat === ideaCat);
+      const on = catOk && (ideaCost === 'all' || el.dataset.cost === ideaCost) && (ideaDist === 'all' || el.dataset.dist === ideaDist) && (!q || el.dataset.text.includes(q));
+      el.hidden = !on; hits += on;
+    });
+    $('#noIdeas', v).hidden = hits > 0;
+  };
+  $('#ideaSearch', v).addEventListener('input', e => { ideaQuery = e.target.value; filter(); });
+  filter();
 }
 
 // ---- Activities -------------------------------------------------------------------
@@ -783,7 +792,7 @@ function todaysDateKey() {
     'feat: spontaneous hangout ✨', true);
   return key;
 }
-$('#photoInput').addEventListener('change', async e => {
+async function onPhotos(e) {
   const files = [...e.target.files]; e.target.value = '';
   if (!files.length) return;
   const target = photoTarget; photoTarget = null;
@@ -799,8 +808,10 @@ $('#photoInput').addEventListener('change', async e => {
   ids.forEach((id, i) => S.put('photo:' + id, { date: key, at: at + i, by: me() }, null, true));
   S.note(`feat(moments): +${plural(ids.length, 'photo')} to "${d.title}" 📸`);
   toast(`💾 ${plural(ids.length, 'photo')} added to “${d.title}”`);
-});
-$('#captureFab').addEventListener('click', () => capture(null));
+}
+$('#photoInput').addEventListener('change', onPhotos);
+$('#cameraInput').addEventListener('change', onPhotos);
+$('#captureFab').addEventListener('click', () => { photoTarget = null; $('#cameraInput').click(); });
 
 // lightbox: a list of {key, id} so it can show one date's photos or a slideshow of all of them
 let lb = { list: [], i: 0, timer: null };

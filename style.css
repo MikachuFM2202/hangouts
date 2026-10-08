@@ -118,8 +118,7 @@ main > section { display: grid; gap: 22px; animation: fadein .35s ease; }
 }
 .tally { margin: 0; min-height: 1.4em; color: var(--muted); font-style: italic; }
 .tos { margin: 0; font-size: 13px; color: var(--muted); }
-.ask-foot { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; align-items: center; margin-top: max(45vh, 320px); padding-top: 20px; border-top: 1px dashed var(--line-strong); width: min(600px, 100%); }
-.ask-foot .tos { flex-basis: 100%; text-align: center; }
+.ask-foot { display: flex; gap: 6px 8px; flex-wrap: wrap; justify-content: center; align-items: center; font-size: 13px; color: var(--muted); width: min(600px, 100%); padding-right: 64px; padding-left: 64px; }
 .tos-list { padding-left: 1.3em; display: grid; gap: 8px; margin: 0 0 8px; }
 
 .yes-done { display: grid; gap: 12px; justify-items: center; text-align: center; }
@@ -377,10 +376,10 @@ details { display: grid; gap: 8px; }
 .tg-parts { font-weight: 500; font-size: 14px; }
 .tg-clock { color: var(--muted); font-variant-numeric: tabular-nums; }
 .tg-sub { font-size: 13px; color: var(--muted); }
-.notes-card { width: min(600px, 100%); display: grid; gap: 8px; justify-items: center; text-align: center; padding: 18px 20px; border-radius: 22px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
-.notes-card p { margin: 0; }
-.tg-quote { font: italic 1.2rem var(--display); overflow-wrap: anywhere; }
-.tg-note-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.notes-card { width: min(600px, 100%); display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 10px 8px 16px; border-radius: 18px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
+.nc-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; text-align: left; }
+.tg-quote { font: italic 1.02rem var(--display); }
+.tg-note-btns { display: flex; gap: 6px; flex: none; }
 .notes-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 8px; max-height: 55dvh; overflow: auto; }
 .notes-list li { padding: 10px 14px; border-radius: 14px; background: var(--bg); border-left: 3px solid var(--a); }
 .notes-list li.from-b { border-left-color: var(--b); }
@@ -396,3 +395,31 @@ details { display: grid; gap: 8px; }
 .install-steps { text-align: left; display: grid; gap: 10px; padding-left: 1.3em; margin: 4px 0 10px; }
 .kbd { display: inline-block; padding: 0 7px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--bg); font-size: 14px; }
 .modal.center .actions { justify-content: center; }
+.idea.hot { border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.hot-pill { background: #fff0e6; color: #c2541a; }
+.filters .search { margin-bottom: 2px; }
+
+/* ---------- front page: one fixed screen, no scrolling ---------- */
+html.noscroll, html.noscroll body { overflow: hidden; height: 100%; overscroll-behavior: none; }
+html.noscroll main { height: calc(100dvh - var(--top-h) - env(safe-area-inset-top, 0px)); padding: 10px 16px calc(12px + env(safe-area-inset-bottom, 0px)); }
+html.noscroll .ask { height: 100%; display: flex; flex-direction: column; align-items: center; gap: clamp(6px, 1.4dvh, 14px); }
+html.noscroll .ask > * { flex: none; }
+html.noscroll .ask-card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: clamp(10px, 2.2dvh, 24px) clamp(16px, 5vw, 40px); gap: clamp(4px, 1.2dvh, 12px); }
+html.noscroll .ask-q { font-size: clamp(1.6rem, min(8.5vw, 6dvh), 3.4rem); }
+html.noscroll .ask-arena { min-height: clamp(70px, 12dvh, 110px); }
+html.noscroll .ask-plan { padding: 8px 12px; }
+html.noscroll .together { padding: clamp(6px, 1.2dvh, 12px) 14px; }
+html.noscroll .tg-days b { font-size: clamp(1.6rem, min(7vw, 4.6dvh), 2.4rem); }
+html.noscroll .install-bar { padding-block: 6px; }
+html.noscroll .ib-icon img { width: 34px; height: 34px; }
+@media (max-height: 700px) {
+  html.noscroll .ask-hearts, html.noscroll .tg-sub, html.noscroll .ib-text span { display: none; }
+}
+@media (max-height: 600px) {
+  html.noscroll .tg-parts, html.noscroll .eyebrow { display: none; }
+}
+@media (max-width: 640px) {
+  /* keep the 📸 button clear of the notes strip and the small links */
+  html.noscroll .fab { width: 50px; height: 50px; font-size: 22px; right: 14px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  html.noscroll .ask-foot { min-height: 52px; justify-content: flex-start; align-content: center; padding: 0 64px 0 4px; }
+}
