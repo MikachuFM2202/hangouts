@@ -31,7 +31,12 @@ function until(d) {
 }
 
 // ---- people + data ------------------------------------------------------------
-const people = () => ({ a: 'Person 1', b: 'Person 2', start: '', ...S.get('cfg:people') });
+// Defaults are us. Older saves may still hold placeholder names, so treat those as unset.
+const US = { a: 'Mika', b: 'Fofo', start: '2021-04-12' };
+const people = () => {
+  const p = S.get('cfg:people') || {}, real = v => v && !/^(Person|Player) [12]$/.test(v);
+  return { a: real(p.a) ? p.a : US.a, b: real(p.b) ? p.b : US.b, start: p.start || US.start };
+};
 const me = () => S.ls.get('me', 'a');
 const nameOf = p => people()[p] || '?';
 const other = p => (p === 'a' ? 'b' : 'a');
@@ -59,15 +64,107 @@ const milestoneLine = () => {
     : `💞 Day ${m.n} together · ${m.label} in ${plural(m.inDays, 'day')} (${fmtDay(m.date)})`;
 };
 
+/** Calendar difference: whole years, months, days from start to now. */
+function sinceParts(startIso, now = new Date()) {
+  const s = parseDay(startIso);
+  let y = now.getFullYear() - s.getFullYear(), m = now.getMonth() - s.getMonth(), d = now.getDate() - s.getDate();
+  if (d < 0) { m--; d += new Date(now.getFullYear(), now.getMonth(), 0).getDate(); }
+  if (m < 0) { y--; m += 12; }
+  return { y, m, d, days: Math.round((parseDay(today()) - s) / 864e5) };
+}
+/** Next monthsary: same day-of-month as the start (clamped for short months). */
+function monthsary() {
+  const s = parseDay(people().start), now = parseDay(today());
+  const on = (y, mo) => new Date(y, mo, Math.min(s.getDate(), new Date(y, mo + 1, 0).getDate()));
+  let d = on(now.getFullYear(), now.getMonth()); if (d < now) d = on(now.getFullYear(), now.getMonth() + 1);
+  const months = (d.getFullYear() - s.getFullYear()) * 12 + d.getMonth() - s.getMonth();
+  return { date: isoDay(d), months, inDays: Math.round((d - now) / 864e5) };
+}
+const clock = () => { const n = new Date(); return `${n.getHours()}h ${pad(n.getMinutes())}m ${pad(n.getSeconds())}s`; };
+const notes = () => S.all('note:').sort((a, b) => b.at - a.at);
+
+function togetherCard() {
+  const P = people();
+  if (!P.start || P.start > today()) return '';
+  const t = sinceParts(P.start), ms = monthsary(), mile = milestone();
+  const parts = [t.y && plural(t.y, 'year'), t.m && plural(t.m, 'month'), plural(t.d, 'day')].filter(Boolean).join(', ');
+  const extra = ms.inDays === 0 ? `🎉 Happy ${ms.months}-month monthsary!` : mile && mile.inDays === 0 ? `🎉 ${esc(mile.label)} today!`
+    : `${ms.months}-month monthsary in ${plural(ms.inDays, 'day')}${mile && mile.inDays <= 60 ? ` · ${esc(mile.label)} in ${plural(mile.inDays, 'day')}` : ''}`;
+  return `
+  <div class="together">
+    <div class="tg-top"><span class="who-a">${esc(P.a)}</span> <span class="tg-heart">💞</span> <span class="who-b">${esc(P.b)}</span></div>
+    <div class="tg-days"><b>${t.days.toLocaleString()}</b> days together</div>
+    <div class="tg-parts">${parts} <span class="tg-clock">and <span data-clock></span></span></div>
+    <div class="tg-sub">Since ${fmtDay(P.start, { day: 'numeric', month: 'long', year: 'numeric' })} · ${extra}</div>
+  </div>`;
+}
+function notesCard() {
+  const latest = notes().find(n => n.by !== me()) || notes()[0];
+  return `
+  <div class="notes-card">
+    <h2 class="col-title">💌 Love notes</h2>
+    ${latest ? `<p class="tg-quote">“${esc(latest.text)}”</p><p class="muted small">From ${esc(nameOf(latest.by))}, ${ago(latest.at)}</p>` : `<p class="muted">Leave a little note. It shows up here on ${esc(nameOf(other(me())))}’s phone.</p>`}
+    <div class="tg-note-btns"><button class="btn small primary" data-act="note-new">Leave a note</button>${notes().length ? `<button class="btn small ghost" data-act="note-all">All notes (${notes().length})</button>` : ''}</div>
+  </div>`;
+}
+
+function writeNote() {
+  const m = openModal(`
+    <form class="form" id="noteForm">
+      <h2>A note for ${esc(nameOf(other(me())))}</h2>
+      <label>Your note<textarea name="text" rows="4" maxlength="280" required placeholder="Thinking of you 💭"></textarea></label>
+      <p class="small muted">It shows on the front page of ${esc(nameOf(other(me())))}’s phone.</p>
+      <div class="actions"><button type="button" class="btn ghost" data-close>Cancel</button><button class="btn primary">Send 💌</button></div>
+    </form>`);
+  const f = $('#noteForm', m); f.text.focus();
+  f.onsubmit = e => {
+    e.preventDefault();
+    const text = f.text.value.trim(); if (!text) return;
+    S.put('note:' + S.uid(), { by: me(), text, at: Date.now() }, `feat(notes): a note from ${nameOf(me())} 💌`);
+    m.close(); toast('💌 Note sent');
+  };
+}
+function allNotes() {
+  const list = notes();
+  const m = openModal(`
+    <h2>Love notes</h2>
+    <ul class="notes-list">${list.map(n => `<li class="from-${n.by}"><p>${esc(n.text)}</p><span class="muted small">${esc(nameOf(n.by))} · ${new Date(n.at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>${n.by === me() ? ` <button class="linkish small" data-del="${esc(n.key)}">delete</button>` : ''}</li>`).join('')}</ul>
+    <div class="actions"><button class="btn ghost" data-close>Close</button><button class="btn primary" id="noteNew">💌 Write one</button></div>`);
+  $('#noteNew', m).onclick = writeNote;
+  m.onclick = e => { const k = e.target.closest('[data-del]')?.dataset.del; if (k) { S.remove(k, 'revert(notes): delete a note'); allNotes(); } };
+}
+
 const dates = () => S.all('date:');
+/** Photo ids for a date, oldest first. Each photo is its own record so two phones adding photos at once never clash. */
+const pics = key => [...(S.get(key)?.photos || []), ...S.all('photo:').filter(p => p.date === key).sort((a, b) => a.at - b.at).map(p => p.key.slice(6))];
 const nextN = () => dates().reduce((m, d) => Math.max(m, d.n || 0), 0) + 1;
 const STATUS = { idea: 'Idea', proposed: 'Asked 💌', planned: 'Booked', done: 'Done' };
 const MOODS = ['', '😍 swoon', '😂 so funny', '🥰 cozy', '🤩 core memory', '😌 chill', '🌧️ chaotic but cute'];
 
+// {name} becomes the person being asked. After the last line it keeps shuffling, so No never runs out.
 const NO_LINES = ['No', 'Are you sure?', 'Really sure? 🥺', 'Think again', 'Pretty please?', 'Wrong button!', 'You’re breaking my heart 💔',
   'Nope, try the other one', 'This button is shy', 'I’ll wait…', 'Have you tried Yes?', 'Still no? 😢', 'Okay, but what if yes', 'So close to yes',
-  'Last chance 👀'];
-const NO_TALLY = ['', 'She’s thinking about it…', 'Playing hard to get, I see', 'The No button is getting tired', 'You know you want to say yes', 'Resistance is futile 💕'];
+  '{name}, pls 🥺', 'I’ll buy you bubble tea 🧋', 'And dessert. Any dessert.', 'You can pick the movie 🎬', 'I’ll hold the umbrella ☂️',
+  'Not this one, silly', 'Try the pink one 👉', 'My heart says no to no', 'Error: too cute to refuse', 'This button is on holiday 🏝️',
+  'Out of order 🚧', 'Have mercy 🙏', 'I already told my mum', 'I’ll be sad forever', 'Okay, I’ll cry a little 😭', 'You can’t catch me!',
+  'Too slow 😜', 'Missed me!', 'Catch me if you can 💨', 'Almost had it…', 'Not even close', 'Are you sure sure?',
+  'I’ll do the dishes for a week', 'Free hugs included 🤗', 'Persistent, aren’t you?', 'The answer is yes, trust me', 'Loading “No”… ⏳',
+  '“No” has left the chat', 'This button is just for decoration', 'Say yes and I’ll stop running', 'Plot twist: there is no “No”',
+  'I can do this all day', '{name}, the other button 👀', 'No is not in stock', 'Ask me again in 100 years', 'Still running… 🏃'];
+const NO_TALLY = ['', 'She’s thinking about it…', 'Playing hard to get, I see', 'The No button is getting tired', 'You know you want to say yes',
+  'Resistance is futile 💕', 'This could go on forever', 'Spoiler: it never works', 'Your thumb must be tired by now', 'Yes is right there 💖',
+  'Okay, now you’re just having fun', 'Still going? Impressive'];
+let noOrder = [];
+/** Line for the n-th dodge: the list in order, then an endless shuffle that never repeats back to back. */
+function noLine(n, who) {
+  let line;
+  if (n < NO_LINES.length) line = NO_LINES[n];
+  else {
+    if (!noOrder.length) { noOrder = NO_LINES.slice(1).sort(() => Math.random() - 0.5); }
+    line = noOrder.pop();
+  }
+  return line.replace('{name}', who);
+}
 
 // ---- UI primitives ------------------------------------------------------------
 function toast(msg, ms = 2600) {
@@ -116,12 +213,53 @@ function render(force) {
   renderSync();
 }
 
+// ---- install to home screen ------------------------------------------------------
+let installEvt = null; // Chrome/Android hands us this when the site can be installed
+addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; render(); });
+addEventListener('appinstalled', () => { installEvt = null; S.ls.set('installHide', true); toast('📲 Added to your home screen'); render(); });
+const isInstalled = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const canInstall = () => !isInstalled() && (!!installEvt || isIOS() || matchMedia('(pointer:coarse)').matches);
+const installBar = () => (canInstall() && !S.ls.get('installHide', false) ? `
+  <div class="install-bar">
+    <span class="ib-icon"><img src="icon-180.png" alt=""></span>
+    <span class="ib-text"><b>Get the app</b><span>Add hangouts to your home screen</span></span>
+    <button class="btn small primary" data-act="install">Add</button>
+    <button class="ib-x" data-act="install-hide" aria-label="Hide">✕</button>
+  </div>` : '');
+async function install() {
+  if (installEvt) {
+    const e = installEvt; installEvt = null;
+    e.prompt();
+    const { outcome } = await e.userChoice.catch(() => ({}));
+    if (outcome !== 'accepted') installEvt = e; // still available for next time
+    return render();
+  }
+  const ios = isIOS(), safari = ios && !/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
+  openModal(`
+    <h2>Add to your home screen</h2>
+    <ol class="install-steps">${ios ? `
+      <li>Tap the <b>Share</b> button <span class="kbd">⬆︎</span> ${safari ? 'at the bottom of Safari' : 'in your browser’s menu'}.</li>
+      <li>Scroll down and tap <b>Add to Home Screen</b> <span class="kbd">＋</span>.</li>
+      <li>Tap <b>Add</b>. The pink heart icon appears on your home screen.</li>`
+      : `
+      <li>Open your browser menu <span class="kbd">⋮</span> (top right in Chrome).</li>
+      <li>Tap <b>Install app</b> or <b>Add to Home screen</b>.</li>
+      <li>Tap <b>Install</b>. The pink heart icon appears on your home screen.</li>`}
+    </ol>
+    ${ios && !safari ? '<p class="small muted">Don’t see it? Open this page in Safari and try again.</p>' : ''}
+    <p class="small muted">It opens full screen like a normal app and always loads the newest version.</p>
+    <div class="actions"><button class="btn primary" data-close>Got it</button></div>`, 'center');
+}
+
 // ---- Ask ----------------------------------------------------------------------
 let noTries = 0, askPlan = null;
 function viewAsk() {
   askPlan = dates().filter(d => d.status === 'proposed').sort((a, b) => b.u - a.u)[0] || null;
   return `
   <section class="ask">
+    ${installBar()}
+    ${togetherCard()}
     <div class="ask-card">
       <div class="ask-hearts" aria-hidden="true"><span>💗</span><span>💕</span><span>💖</span></div>
       <p class="eyebrow">${askPlan ? `${esc(nameOf(askPlan.by))} has a question for ${esc(nameOf(other(askPlan.by)))}` : 'A very important question'}</p>
@@ -138,6 +276,7 @@ function viewAsk() {
       </div>
       <p class="tally" id="tally" aria-live="polite"></p>
     </div>
+    ${notesCard()}
     <div class="ask-foot">
       <p class="tos">By saying yes you agree to the <button class="linkish" data-act="tos">Terms of Cuddles</button>.</p>
       <button class="btn ghost small" data-act="copy-invite">🔗 Send this page</button>
@@ -152,10 +291,9 @@ function bindAsk(v) {
   let lastDodge = 0;
 
   const level = () => {
-    yes.style.setProperty('--grow', Math.min(1 + noTries * 0.07, 1.9));
-    if (noTries >= NO_LINES.length) { no.textContent = 'Yes 💖'; no.classList.add('yes'); no.dataset.converted = '1'; }
-    else no.textContent = NO_LINES[noTries];
-    tally.textContent = NO_TALLY[Math.min(NO_TALLY.length - 1, Math.ceil(noTries / 3))];
+    yes.style.setProperty('--grow', Math.min(1 + noTries * 0.05, 1.7));
+    no.textContent = noLine(noTries, nameOf(askPlan ? other(askPlan.by) : other(me())));
+    tally.textContent = noTries ? NO_TALLY[1 + Math.floor((noTries - 1) / 4) % (NO_TALLY.length - 1)] : '';
   };
   const settle = () => { no.classList.remove('loose'); no.style.translate = ''; slot.append(no); };
   level();
@@ -168,9 +306,7 @@ function bindAsk(v) {
 
   // Glide away from the pointer: try straight away from it first, then fan out, staying on screen.
   const dodge = (px, py) => {
-    if (no.dataset.converted) return;
     noTries++; level();
-    if (no.dataset.converted) return settle();
     lastDodge = performance.now();
     const r = no.getBoundingClientRect();
     if (!no.classList.contains('loose')) {
@@ -205,14 +341,13 @@ function bindAsk(v) {
   };
 
   document.addEventListener('pointermove', e => {
-    if (e.pointerType !== 'mouse' || no.dataset.converted || performance.now() - lastDodge < 180) return;
+    if (e.pointerType !== 'mouse' || performance.now() - lastDodge < 180) return;
     const r = no.getBoundingClientRect();
     const dx = Math.max(r.left - e.clientX, 0, e.clientX - r.right), dy = Math.max(r.top - e.clientY, 0, e.clientY - r.bottom);
     if (Math.hypot(dx, dy) < 60) dodge(e.clientX, e.clientY);
   }, sig);
-  no.addEventListener('pointerdown', e => { if (!no.dataset.converted) { e.preventDefault(); dodge(e.clientX, e.clientY); } }, sig);
+  no.addEventListener('pointerdown', e => { e.preventDefault(); dodge(e.clientX, e.clientY); }, sig);
   no.addEventListener('click', e => {
-    if (no.dataset.converted) return sayYes();
     e.preventDefault();
     if (performance.now() - lastDodge < 500) return; // the tap's pointerdown already dodged
     const r = no.getBoundingClientRect(); dodge(r.x + r.width / 2, r.y + r.height / 2);
@@ -244,7 +379,7 @@ async function sayYes() {
   for (const li of $$('#checks li', d)) { await sleep(reduceMotion ? 0 : 330); li.classList.add('on'); }
   $('#yesNext', d).hidden = false; $('#yesAct', d).hidden = false;
   S.put('yes:' + S.uid(), { by: me(), at: Date.now(), plan: plan?.key || null }, plan ? `feat(rsvp): YES to "${plan.title}" 💖` : 'feat(rsvp): YES 💖', true);
-  if (plan) S.put(plan.key, { ...plan, status: 'planned', answeredAt: Date.now() }, null, true);
+  if (plan && S.get(plan.key)) S.put(plan.key, { ...S.get(plan.key), status: 'planned', answeredAt: Date.now() }, null, true);
   S.note();
 }
 
@@ -356,7 +491,7 @@ function bindCalendar(v) {
 const thumb = (key, id, i) => `<button class="thumb" data-act="photo" data-key="${esc(key)}" data-i="${i}"><img data-photo="${esc(id)}" alt="Photo ${i + 1}" loading="lazy"></button>`;
 function card(d) {
   const past = d.date && d.date < today() && d.status !== 'done';
-  const photos = d.photos || [];
+  const photos = pics(d.key);
   return `
   <article class="card st-${d.status}${past ? ' overdue' : ''}" data-key="${esc(d.key)}">
     <div class="card-top">
@@ -458,7 +593,7 @@ function openDateForm(d = {}, retroFocus = false) {
     const x = Object.fromEntries(new FormData(f));
     x.title = x.title.trim(); x.rating = x.rating ? Number(x.rating) : undefined;
     const key = d.key || 'date:' + S.uid();
-    const out = { photos: [], by: me(), n: nextN(), ...d, ...x };
+    const out = { photos: [], by: me(), n: nextN(), ...d, ...S.get(key), ...x }; // fresh copy: keeps photos added on the other phone meanwhile
     const nowDone = x.status === 'done' && (isNew || S.get(key)?.status !== 'done');
     S.put(key, out, `${isNew ? 'feat(plans): add' : 'fix(plans): update'} "${x.title}" ${x.emoji || ''}`.trim());
     m.close();
@@ -578,7 +713,7 @@ function viewActivities() {
 // ---- Memories ---------------------------------------------------------------------
 function viewMemories() {
   const done = dates().filter(d => d.status === 'done').sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const photos = done.reduce((s, d) => s + (d.photos?.length || 0), 0);
+  const photos = done.reduce((s, d) => s + pics(d.key).length, 0);
   const rated = done.filter(d => d.rating), avg = rated.length ? (rated.reduce((s, d) => s + d.rating, 0) / rated.length).toFixed(1) : '–';
   const together = daysTogether(), spent = done.reduce((t, d) => t + (Number(d.budget) || 0), 0);
   let lastMonth = '';
@@ -606,7 +741,7 @@ function viewMemories() {
         <div class="mem-meta">${d.rating ? `<span class="stars-ro" aria-label="${plural(d.rating, 'star')}">${'★'.repeat(d.rating)}<span>${'★'.repeat(5 - d.rating)}</span></span>` : ''}${d.mood ? `<span class="pill">${esc(d.mood)}</span>` : ''}${d.place ? mapLink(d.place) : ''}</div>
         ${d.best ? `<p class="best">“${esc(d.best)}”</p>` : ''}
         ${d.notes ? `<p class="notes">${esc(d.notes)}</p>` : ''}
-        <div class="gallery">${(d.photos || []).map((p, j) => thumb(d.key, p, j)).join('')}
+        <div class="gallery">${pics(d.key).map((p, j) => thumb(d.key, p, j)).join('')}
           <button class="thumb add" data-act="capture" aria-label="Add photos">＋<span>photos</span></button></div>
         <div class="card-actions"><span class="spacer"></span><button class="btn small ghost" data-act="retro">Edit</button><button class="btn small ghost danger" data-act="delete" aria-label="Delete">🗑</button></div>
       </li>`;
@@ -660,14 +795,16 @@ $('#photoInput').addEventListener('change', async e => {
   if (!ids.length) return;
   const key = (target && S.get(target)) ? target : todaysDateKey(); // only create a hangout once a photo actually worked
   const d = S.get(key);
-  S.put(key, { ...d, photos: [...(d.photos || []), ...ids] }, `feat(moments): +${plural(ids.length, 'photo')} to "${d.title}" 📸`);
+  const at = Date.now();
+  ids.forEach((id, i) => S.put('photo:' + id, { date: key, at: at + i, by: me() }, null, true));
+  S.note(`feat(moments): +${plural(ids.length, 'photo')} to "${d.title}" 📸`);
   toast(`💾 ${plural(ids.length, 'photo')} added to “${d.title}”`);
 });
 $('#captureFab').addEventListener('click', () => capture(null));
 
 // lightbox: a list of {key, id} so it can show one date's photos or a slideshow of all of them
 let lb = { list: [], i: 0, timer: null };
-const photosOf = key => (S.get(key)?.photos || []).map(id => ({ key, id }));
+const photosOf = key => pics(key).map(id => ({ key, id }));
 function openLightbox(list, i, play = false) {
   lb = { list, i, timer: null }; showLb();
   const d = $('#lightbox'); if (!d.open) d.showModal();
@@ -678,7 +815,7 @@ function setPlay(on) {
   const b = $('#lbPlay'); b.textContent = on ? '⏸ Pause' : '▶ Play'; b.hidden = lb.list.length < 2;
 }
 function showLb() {
-  lb.list = lb.list.filter(p => S.get(p.key)?.photos?.includes(p.id)); // drop photos removed meanwhile
+  lb.list = lb.list.filter(p => pics(p.key).includes(p.id)); // drop photos removed meanwhile
   if (!lb.list.length) return $('#lightbox').close();
   lb.i = (lb.i + lb.list.length) % lb.list.length;
   const { key, id } = lb.list[lb.i], d = S.get(key), img = $('#lbImg');
@@ -697,7 +834,8 @@ $('#lightbox').addEventListener('click', e => {
   if (a === 'play') setPlay(!lb.timer);
   if (a === 'delete') {
     const { key, id } = lb.list[lb.i], d = S.get(key);
-    S.put(key, { ...d, photos: d.photos.filter(p => p !== id) }, `revert(moments): remove a photo from "${d.title}"`);
+    if (d.photos?.includes(id)) S.put(key, { ...d, photos: d.photos.filter(p => p !== id) }, `revert(moments): remove a photo from "${d.title}"`);
+    else S.remove('photo:' + id, `revert(moments): remove a photo from "${d.title}"`);
     showLb();
   }
 });
@@ -718,6 +856,10 @@ $('#view').addEventListener('click', e => {
   const monthDays = () => { const y = calCursor.getFullYear(), mo = calCursor.getMonth(); return Array.from({ length: new Date(y, mo + 1, 0).getDate() }, (_, i) => new Date(y, mo, i + 1)); };
   ({
     tos: showTos,
+    'note-new': writeNote,
+    install,
+    'install-hide': () => { S.ls.set('installHide', true); render(); toast('You can still add it from ⚙ Settings'); },
+    'note-all': allNotes,
     settings: openSettings,
     icat: () => { ideaCat = btn.dataset.v; render(); },
     icost: () => { ideaCost = btn.dataset.v; render(); },
@@ -779,7 +921,7 @@ $('#view').addEventListener('click', e => {
       if (all.length) openLightbox(all, 0, true);
     },
     delete: () => {
-      openModal(`<h2>Delete this?</h2><p class="muted">“${esc(d.title)}”${d.photos?.length ? ` and its ${plural(d.photos.length, 'photo')}` : ''} will be removed for both of you.</p>
+      openModal(`<h2>Delete this?</h2><p class="muted">“${esc(d.title)}”${pics(key).length ? ` and its ${plural(pics(key).length, 'photo')}` : ''} will be removed for both of you.</p>
         <div class="actions"><button class="btn ghost" data-close>Keep it</button><button class="btn danger-solid" id="confirmDel">Delete</button></div>`);
       $('#confirmDel').onclick = () => { S.remove(key, `revert: delete "${d.title}"`); $('#modal').close(); toast('Deleted'); };
     },
@@ -889,6 +1031,10 @@ async function openSettings() {
         <p class="small">This phone belongs to <b>${esc(nameOf(me()))}</b>. <button type="button" class="linkish" data-s="me">Change</button></p>
       </fieldset>
       <fieldset><legend>Share between phones</legend>${syncBlock}<p class="err" id="sErr" role="alert"></p></fieldset>
+      ${isInstalled() ? '' : `<fieldset><legend>App</legend>
+        <p class="small muted">Put hangouts on your home screen so it opens like a normal app.</p>
+        <div class="actions left"><button type="button" class="btn small primary" data-s="install">📲 Add to home screen</button></div>
+      </fieldset>`}
       <fieldset><legend>Backup</legend>
         <div class="actions left"><button type="button" class="btn ghost small" data-s="export">Download backup</button><label class="btn ghost small file">Restore backup<input type="file" accept="application/json" id="sImport" hidden></label></div>
         <p class="small muted">Backups include plans, free days and notes. Photos aren’t included.</p>
@@ -898,7 +1044,7 @@ async function openSettings() {
   const f = $('#setForm', m), err = msg => { $('#sErr', m).textContent = msg; };
   f.addEventListener('submit', e => {
     e.preventDefault();
-    S.put('cfg:people', { a: f.a.value.trim() || 'Person 1', b: f.b.value.trim() || 'Person 2', start: f.start.value }, 'chore(settings): update names');
+    S.put('cfg:people', { a: f.a.value.trim() || US.a, b: f.b.value.trim() || US.b, start: f.start.value || US.start }, 'chore(settings): update names');
     m.close(); toast('Saved');
     if (!S.ls.get('me', null)) pickMe();
   });
@@ -910,6 +1056,7 @@ async function openSettings() {
     const btn = e.target.closest('button');
     const busy = async fn => { btn.disabled = true; const t = btn.textContent; btn.textContent = 'One moment…'; err(''); try { await fn(); } catch (x) { err(x.message); } finally { btn.disabled = false; btn.textContent = t; } };
     if (a === 'me') { m.close(); pickMe(); }
+    if (a === 'install') { m.close(); install(); }
     if (a === 'sync') busy(async () => { await S.sync(); m.close(); toast(S.status.state === 'ok' ? '✓ Synced' : 'Couldn’t sync: ' + S.status.error); });
     if (a === 'retoken') busy(async () => {
       const t = $('#sNewToken', m).value.trim(); if (!t) throw new Error('Paste the new token first.');
@@ -946,6 +1093,7 @@ function renderSync() {
 }
 $('#syncPill').addEventListener('click', () => (S.isSynced() && S.status.state !== 'error' ? S.sync() : openSettings()));
 function tick() {
+  $$('[data-clock]').forEach(el => { el.textContent = clock(); });
   $$('[data-until]').forEach(el => { const d = S.get(el.dataset.until); if (d) el.textContent = until(d); });
 }
 setInterval(tick, 1000);
@@ -979,6 +1127,6 @@ await S.init();
 route();
 await gate();
 route();
-if (!S.ls.get('onboarded', false)) { S.ls.set('onboarded', true); if (!S.get('cfg:people')) openSettings(); else if (!S.ls.get('me', null)) pickMe(); }
+if (!S.ls.get('onboarded', false)) { S.ls.set('onboarded', true); if (!S.ls.get('me', null)) pickMe(); }
 else if (!S.ls.get('me', null) && S.get('cfg:people')) pickMe();
 S.sync();
