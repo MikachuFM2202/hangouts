@@ -24,6 +24,10 @@ function ago(t) {
 }
 const whenOf = d => { const t = parseDay(d.date); const [h, m] = (d.time || '18:00').split(':').map(Number); t.setHours(h, m); return t.getTime(); };
 function until(d) {
+  if (!d.time) { // no time set: count whole days, not down to an invented hour
+    const days = Math.round((parseDay(d.date) - parseDay(today())) / 864e5);
+    return days <= 0 ? 'Today 💖' : days === 1 ? 'Tomorrow' : `in ${days} days`;
+  }
   const ms = whenOf(d) - Date.now();
   if (ms <= 0) return ms > -6 * 3600e3 ? 'Happening now 💖' : 'Today';
   const dd = Math.floor(ms / 864e5), h = Math.floor(ms / 36e5) % 24, m = Math.floor(ms / 6e4) % 60, s = Math.floor(ms / 1e3) % 60;
@@ -83,6 +87,23 @@ function monthsary() {
 const clock = () => { const n = new Date(); return `${n.getHours()}h ${pad(n.getMinutes())}m ${pad(n.getSeconds())}s`; };
 const notes = () => S.all('note:').sort((a, b) => b.at - a.at);
 
+// ---- weather -----------------------------------------------------------------------
+// Free Open-Meteo forecast for Wangsa Maju, fetched once per visit. Covers the next 16 days.
+let wx = null;
+const WX_ICON = c => (c === 0 ? '☀️' : c <= 2 ? '🌤️' : c === 3 ? '☁️' : c <= 48 ? '🌫️' : c <= 57 ? '🌦️' : c <= 67 ? '🌧️' : c <= 77 ? '🌨️' : c <= 82 ? '🌧️' : '⛈️');
+async function loadWeather() {
+  if (wx) return; wx = {};
+  try {
+    const j = await (await fetch('https://api.open-meteo.com/v1/forecast?latitude=3.205&longitude=101.735&daily=weather_code,temperature_2m_max,precipitation_probability_max&timezone=Asia%2FKuala_Lumpur&forecast_days=16')).json();
+    j.daily.time.forEach((d, i) => { wx[d] = { code: j.daily.weather_code[i], max: Math.round(j.daily.temperature_2m_max[i]), rain: j.daily.precipitation_probability_max[i] ?? 0 }; });
+    render();
+  } catch { /* offline or blocked: just no forecast */ }
+}
+const wxLine = date => {
+  const w = wx?.[date]; if (!w) return '';
+  return `<div class="wx">${WX_ICON(w.code)} ${w.max}° · ${w.rain}% chance of rain${w.rain >= 60 ? ' · bring an umbrella ☂️' : ''}</div>`;
+};
+
 function togetherCard() {
   const P = people();
   if (!P.start || P.start > today()) return '';
@@ -90,12 +111,16 @@ function togetherCard() {
   const parts = [t.y && plural(t.y, 'year'), t.m && plural(t.m, 'month'), plural(t.d, 'day')].filter(Boolean).join(', ');
   const extra = ms.inDays === 0 ? `🎉 Happy ${ms.months}-month monthsary!` : mile && mile.inDays === 0 ? `🎉 ${esc(mile.label)} today!`
     : `${ms.months}-month monthsary in ${plural(ms.inDays, 'day')}${mile && mile.inDays <= 60 ? ` · ${esc(mile.label)} in ${plural(mile.inDays, 'day')}` : ''}`;
+  const t0 = today(), soon = dates().filter(d => d.status === 'planned' && d.date && d.date >= t0).sort((a, b) => a.date.localeCompare(b.date))[0];
+  const soonDays = soon && Math.round((parseDay(soon.date) - parseDay(t0)) / 864e5);
+  const next = soon && soonDays <= 7 ? `<div class="tg-next">${esc(soon.emoji || '💖')} ${esc(soon.title)} ${soonDays === 0 ? 'is today!' : soonDays === 1 ? 'is tomorrow' : `in ${soonDays} days`}</div>` : '';
   return `
   <div class="together">
     <div class="tg-top"><span class="who-a">${esc(P.a)}</span> <span class="tg-heart">💞</span> <span class="who-b">${esc(P.b)}</span></div>
     <div class="tg-days"><b>${t.days.toLocaleString()}</b> days together</div>
     <div class="tg-parts">${parts} <span class="tg-clock">and <span data-clock></span></span></div>
     <div class="tg-sub">Since ${fmtDay(P.start, { day: 'numeric', month: 'long', year: 'numeric' })} · ${extra}</div>
+    ${next}
   </div>`;
 }
 function notesCard() {
@@ -150,7 +175,7 @@ const NO_LINES = ['No', 'Are you sure?', 'Really sure? 🥺', 'Think again', 'Pr
   'I’ll do the dishes for a week', 'Free hugs included 🤗', 'Persistent, aren’t you?', 'The answer is yes, trust me', 'Loading “No”… ⏳',
   '“No” has left the chat', 'This button is just for decoration', 'Say yes and I’ll stop running', 'Plot twist: there is no “No”',
   'I can do this all day', '{name}, the other button 👀', 'No is not in stock', 'Ask me again in 100 years', 'Still running… 🏃'];
-const NO_TALLY = ['', 'She’s thinking about it…', 'Playing hard to get, I see', 'The No button is getting tired', 'You know you want to say yes',
+const NO_TALLY = ['', '{name} is thinking about it…', 'Playing hard to get, I see', 'The No button is getting tired', 'You know you want to say yes',
   'Resistance is futile 💕', 'This could go on forever', 'Spoiler: it never works', 'Your thumb must be tired by now', 'Yes is right there 💖',
   'Okay, now you’re just having fun', 'Still going? Impressive'];
 let noOrder = [];
@@ -293,7 +318,7 @@ function bindAsk(v) {
   const level = () => {
     yes.style.setProperty('--grow', Math.min(1 + noTries * 0.05, 1.7));
     no.textContent = noLine(noTries, nameOf(askPlan ? other(askPlan.by) : other(me())));
-    tally.textContent = noTries ? NO_TALLY[1 + Math.floor((noTries - 1) / 4) % (NO_TALLY.length - 1)] : '';
+    tally.textContent = noTries ? NO_TALLY[1 + Math.floor((noTries - 1) / 4) % (NO_TALLY.length - 1)].replace('{name}', nameOf(askPlan ? other(askPlan.by) : other(me()))) : '';
   };
   const settle = () => { no.classList.remove('loose'); no.style.translate = ''; slot.append(no); };
   level();
@@ -507,6 +532,7 @@ function card(d) {
       <span class="pill st">${past ? 'How was it?' : STATUS[d.status]}</span>
     </div>
     ${d.status === 'planned' && d.date && !past ? `<div class="countdown" data-until="${esc(d.key)}">${until(d)}</div>` : ''}
+    ${d.date && !past && d.status !== 'done' ? wxLine(d.date) : ''}
     ${d.notes ? `<p class="notes">${esc(d.notes)}</p>` : ''}
     ${photos.length ? `<div class="strip">${photos.slice(0, 6).map((p, i) => thumb(d.key, p, i)).join('')}${photos.length > 6 ? `<span class="more">+${photos.length - 6}</span>` : ''}</div>` : ''}
     <div class="card-actions">
@@ -549,6 +575,7 @@ function viewPlans() {
         <h2>${esc(next.title)}</h2>
         <div class="muted">${fmtDay(next.date, LONG)}${next.time ? ' · ' + fmtTime(next.time) : ''}${next.place ? ' · ' + esc(next.place) : ''}</div>
         <div class="countdown big" data-until="${esc(next.key)}">${until(next)}</div>
+        ${wxLine(next.date)}
       </div>
     </div>` : ''}
     ${retro.length ? section('How did it go?', retro, '') : ''}
@@ -578,6 +605,11 @@ function openDateForm(d = {}, retroFocus = false) {
     </div>
     <label>Status<select name="status">${Object.entries(STATUS).map(([k, l]) => `<option value="${k}" ${(d.status || 'idea') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label>Notes<textarea name="notes" rows="3" maxlength="2000" placeholder="Bring a jacket, it gets cold.">${esc(d.notes)}</textarea></label>
+    ${!isNew && pics(d.key).length ? `<fieldset class="photo-manage">
+      <legend>Photos (${pics(d.key).length})</legend>
+      <div class="pm-grid">${pics(d.key).map(id => `<button type="button" class="pm-item" data-pid="${esc(id)}" aria-pressed="false" title="Tap to remove"><img data-photo="${esc(id)}" alt=""><span class="pm-x" aria-hidden="true">✕</span></button>`).join('')}</div>
+      <div class="pm-foot"><span class="small muted" id="pmNote">Tap a photo to mark it for removal.</span><button type="button" class="btn small ghost" id="pmSave" disabled>Preparing…</button></div>
+    </fieldset>` : ''}
     <fieldset class="retro"${retroFocus || d.status === 'done' ? '' : ' hidden'}>
       <legend>Afterwards</legend>
       <div class="row"><div><span class="lbl">Rating</span><div class="stars">${stars}</div></div>
@@ -588,16 +620,35 @@ function openDateForm(d = {}, retroFocus = false) {
   </form>`);
   const f = $('#dateForm', m);
   f.status.addEventListener('change', () => { $('.retro', f).hidden = f.status.value !== 'done'; });
+  const removing = new Set();
+  if ($('.photo-manage', f)) {
+    hydratePhotos(f);
+    f.addEventListener('click', e => {
+      const it = e.target.closest('.pm-item'); if (!it) return;
+      const id = it.dataset.pid, on = !removing.has(id);
+      on ? removing.add(id) : removing.delete(id);
+      it.setAttribute('aria-pressed', on);
+      $('#pmNote', f).textContent = removing.size ? `${plural(removing.size, 'photo')} will be removed when you save.` : 'Tap a photo to mark it for removal.';
+    });
+    const btn = $('#pmSave', f), list = pics(d.key).map(id => ({ key: d.key, id }));
+    let files = null;
+    photoFiles(list).then(fl => { files = fl; btn.disabled = false; btn.textContent = `⬇ Save all to phone (${fl.length})`; });
+    btn.onclick = () => files && savePhotos(files.filter(x => !removing.has(x.id)));
+  }
   f.addEventListener('submit', e => {
     e.preventDefault();
     const x = Object.fromEntries(new FormData(f));
     x.title = x.title.trim(); x.rating = x.rating ? Number(x.rating) : undefined;
     const key = d.key || 'date:' + S.uid();
     const out = { photos: [], by: me(), n: nextN(), ...d, ...S.get(key), ...x }; // fresh copy: keeps photos added on the other phone meanwhile
+    if (removing.size) {
+      out.photos = (out.photos || []).filter(id => !removing.has(id));
+      removing.forEach(id => S.get('photo:' + id) && S.remove('photo:' + id, null));
+    }
     const nowDone = x.status === 'done' && (isNew || S.get(key)?.status !== 'done');
     S.put(key, out, `${isNew ? 'feat(plans): add' : 'fix(plans): update'} "${x.title}" ${x.emoji || ''}`.trim());
     m.close();
-    toast(isNew ? (x.status === 'done' ? '💾 Added to memories' : '💾 Plan saved') : 'Saved');
+    toast(isNew ? (x.status === 'done' ? '💾 Added to memories' : '💾 Plan saved') : removing.size ? `Saved · ${plural(removing.size, 'photo')} removed` : 'Saved');
     if (nowDone) burst();
   });
   (retroFocus ? $('.stars input', f) : f.title)?.focus();
@@ -817,7 +868,10 @@ $('#captureFab').addEventListener('click', () => { photoTarget = null; $('#camer
 let lb = { list: [], i: 0, timer: null };
 const photosOf = key => pics(key).map(id => ({ key, id }));
 function openLightbox(list, i, play = false) {
-  lb = { list, i, timer: null }; showLb();
+  lb = { list, i, timer: null, files: null }; showLb();
+  const all = $('#lbSaveAll'); all.hidden = list.length < 2; all.disabled = true; all.textContent = 'Preparing…';
+  const mine = lb;
+  photoFiles(list).then(files => { if (lb !== mine) return; lb.files = files; all.disabled = false; all.textContent = `Save all (${files.length})`; });
   const d = $('#lightbox'); if (!d.open) d.showModal();
   setPlay(play);
 }
@@ -843,6 +897,11 @@ $('#lightbox').addEventListener('click', e => {
   if (a === 'prev') { lb.i--; showLb(); setPlay(false); }
   if (a === 'next') { lb.i++; showLb(); setPlay(false); }
   if (a === 'play') setPlay(!lb.timer);
+  if (a === 'save' || a === 'saveall') {
+    if (!lb.files) return toast('One moment, still preparing…');
+    if (a === 'saveall') return savePhotos(lb.files.filter(x => lb.list.some(p => p.id === x.id))); // skip ones removed meanwhile
+    return savePhotos(lb.files.filter(x => x.id === lb.list[lb.i]?.id));
+  }
   if (a === 'delete') {
     const { key, id } = lb.list[lb.i], d = S.get(key);
     if (d.photos?.includes(id)) S.put(key, { ...d, photos: d.photos.filter(p => p !== id) }, `revert(moments): remove a photo from "${d.title}"`);
@@ -934,11 +993,43 @@ $('#view').addEventListener('click', e => {
     delete: () => {
       openModal(`<h2>Delete this?</h2><p class="muted">“${esc(d.title)}”${pics(key).length ? ` and its ${plural(pics(key).length, 'photo')}` : ''} will be removed for both of you.</p>
         <div class="actions"><button class="btn ghost" data-close>Keep it</button><button class="btn danger-solid" id="confirmDel">Delete</button></div>`);
-      $('#confirmDel').onclick = () => { S.remove(key, `revert: delete "${d.title}"`); $('#modal').close(); toast('Deleted'); };
+      $('#confirmDel').onclick = () => {
+        S.all('photo:').filter(p => p.date === key).forEach(p => S.remove(p.key, null));
+        S.remove(key, `revert: delete "${d.title}"`); $('#modal').close(); toast('Deleted');
+      };
     },
   })[btn.dataset.act]?.();
 });
 
+
+// ---- saving photos to the phone (then Google Photos backs them up) -----------------
+/** Load photos as File objects ahead of time: iPhones only allow the share sheet right after a tap. */
+async function photoFiles(list) {
+  const out = [];
+  for (const [i, { key, id }] of list.entries()) {
+    try {
+      const blob = await (await fetch(await S.photoURL(id))).blob();
+      const d = S.get(key), name = `${(d?.title || 'hangout').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'hangout'}-${d?.date || 'photo'}-${i + 1}.jpg`;
+      out.push({ id, file: new File([blob], name, { type: 'image/jpeg' }) });
+    } catch { /* photo not on this phone yet: skip it */ }
+  }
+  return out;
+}
+async function savePhotos(items) {
+  const files = items.map(x => x.file);
+  if (!files.length) return toast('Those photos haven’t reached this phone yet');
+  if (matchMedia('(pointer:coarse)').matches && navigator.canShare?.({ files })) {
+    try { await navigator.share({ files }); return; }
+    catch (e) { if (e.name === 'AbortError') return; if (e.name === 'NotAllowedError') return toast('Tap Save again'); }
+  }
+  for (const f of files) { // desktop: plain downloads
+    const url = URL.createObjectURL(f);
+    Object.assign(document.createElement('a'), { href: url, download: f.name }).click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    await sleep(250);
+  }
+  toast(`⬇ ${plural(files.length, 'photo')} downloaded`);
+}
 
 // ---- share + calendar -------------------------------------------------------------
 /** Hand a file to the user: share sheet on phones (works in home-screen apps), download elsewhere. */
@@ -1129,7 +1220,19 @@ async function gate() {
   });
 }
 
-S.onChange(what => (what === 'items' ? render() : renderSync()));
+const unseenNotes = () => notes().filter(n => n.by !== me() && n.at > S.ls.get('notesSeen', 0));
+function noteAlert() {
+  const n = unseenNotes();
+  $('.tab[data-tab="ask"]').classList.toggle('has-new', n.length > 0);
+  if (n.length && n[0].at > (S.ls.get('notesToasted', 0))) { S.ls.set('notesToasted', n[0].at); toast(`💌 New note from ${nameOf(n[0].by)}`, 4000); }
+  if (tab === 'ask' && n.length) S.ls.set('notesSeen', n[0].at); // seen once the front page shows it
+}
+S.onChange(what => {
+  if (what === 'items') { render(); noteAlert(); return; }
+  renderSync();
+  if (S.status.state === 'ok') $$('.thumb.missing img[data-photo]').forEach(img => { img.closest('.thumb').classList.remove('missing'); hydratePhotos(img.closest('.thumb')); });
+});
+addEventListener('hashchange', () => setTimeout(noteAlert));
 addEventListener('hashchange', route);
 const VIEWS = { ask: viewAsk, calendar: viewCalendar, plans: viewPlans, ideas: viewIdeas, activities: viewActivities, memories: viewMemories };
 const BIND = { ask: bindAsk, calendar: bindCalendar, ideas: bindIdeas, memories: bindMemories };
@@ -1141,3 +1244,5 @@ route();
 if (!S.ls.get('onboarded', false)) { S.ls.set('onboarded', true); if (!S.ls.get('me', null)) pickMe(); }
 else if (!S.ls.get('me', null) && S.get('cfg:people')) pickMe();
 S.sync();
+noteAlert();
+loadWeather();

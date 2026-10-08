@@ -423,3 +423,20 @@ html.noscroll .ib-icon img { width: 34px; height: 34px; }
   html.noscroll .fab { width: 50px; height: 50px; font-size: 22px; right: 14px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
   html.noscroll .ask-foot { min-height: 52px; justify-content: flex-start; align-content: center; padding: 0 64px 0 4px; }
 }
+.wx { font-size: 13px; color: var(--muted); }
+.hero .wx { margin-top: 2px; }
+.tg-next { font-size: 13px; font-weight: 600; color: var(--accent-deep); }
+.tab.has-new { position: relative; }
+.tab.has-new::after { content: ''; position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); }
+@media (max-height: 600px) { html.noscroll .tg-next { display: none; } }
+
+/* ---------- photo manager in the edit form ---------- */
+.pm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
+.pm-item { position: relative; aspect-ratio: 1; max-width: 100%; padding: 0; border: 2px solid transparent; border-radius: 10px; overflow: hidden; background: var(--bg-2); cursor: pointer; }
+.pm-item img { width: 100%; height: 100%; object-fit: cover; display: block; transition: opacity .2s, filter .2s; }
+.pm-x { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border-radius: 50%; background: rgb(255 255 255 / .9); color: var(--text); font-size: 11px; display: grid; place-items: center; }
+.pm-item[aria-pressed="true"] { border-color: var(--danger); }
+.pm-item[aria-pressed="true"] img { opacity: .35; filter: grayscale(1); }
+.pm-item[aria-pressed="true"] .pm-x { background: var(--danger); color: #fff; }
+.pm-foot { display: flex; gap: 8px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+.lb-bar .btn:not(.ghost) { background: rgb(255 255 255 / .92); color: var(--text); border-color: transparent; }
