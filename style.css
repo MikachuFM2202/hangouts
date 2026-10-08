@@ -226,7 +226,7 @@ main > section { display: grid; gap: 22px; animation: fadein .35s ease; }
 .a-top { display: flex; gap: 12px; align-items: center; }
 
 /* ---------- memories ---------- */
-.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .stats div { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 2px; min-width: 0; }
 .stats b { font: 600 1.6rem var(--display); font-variant-numeric: tabular-nums; }
 .stats b small { font-size: .9rem; color: var(--star); margin-left: 2px; }
@@ -364,3 +364,5 @@ legend { font: 600 14px var(--sans); color: var(--accent-deep); padding: 0 6px; 
 .share-grid { display: grid; gap: 8px; }
 details summary { cursor: pointer; color: var(--accent-deep); }
 details { display: grid; gap: 8px; }
+.lb-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.milestone { margin: 8px 0 0; display: inline-block; padding: 6px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-deep); font-size: 14px; font-weight: 500; }

@@ -38,6 +38,27 @@ const other = p => (p === 'a' ? 'b' : 'a');
 const isFree = (p, ds) => !!S.get(`free:${p}:${ds}`)?.v;
 const daysTogether = () => { const s = people().start; return s ? Math.max(0, Math.floor((Date.now() - parseDay(s)) / 864e5)) : null; };
 
+/** Next day-count or anniversary worth celebrating, e.g. {label: 'Day 700', date: '2027-01-26', inDays: 99}. */
+function milestone() {
+  const start = people().start; if (!start) return null;
+  const s = parseDay(start), now = parseDay(today()), n = Math.round((now - s) / 864e5);
+  const at = days => { const d = new Date(s); d.setDate(d.getDate() + days); return d; };
+  let next100 = (Math.floor(n / 100) + 1) * 100;
+  const yrs = now.getFullYear() - s.getFullYear();
+  let ann = new Date(s); ann.setFullYear(s.getFullYear() + yrs); if (ann < now) ann.setFullYear(ann.getFullYear() + 1);
+  const annYears = ann.getFullYear() - s.getFullYear();
+  const cands = [{ label: `Day ${next100}`, d: at(next100) }];
+  if (annYears > 0) cands.push({ label: annYears === 1 ? 'First anniversary' : `${annYears}-year anniversary`, d: ann });
+  if (n > 0 && n % 100 === 0) cands.push({ label: `Day ${n}`, d: now });
+  const m = cands.sort((a, b) => a.d - b.d)[0];
+  return { n, label: m.label, date: isoDay(m.d), inDays: Math.round((m.d - now) / 864e5) };
+}
+const milestoneLine = () => {
+  const m = milestone(); if (!m) return '';
+  return m.inDays === 0 ? `🎉 Today is your ${m.label.replace(/^Day/, 'day')}! Happy ${m.label.includes('anniversary') ? 'anniversary' : 'milestone'} 💖`
+    : `💞 Day ${m.n} together · ${m.label} in ${plural(m.inDays, 'day')} (${fmtDay(m.date)})`;
+};
+
 const dates = () => S.all('date:');
 const nextN = () => dates().reduce((m, d) => Math.max(m, d.n || 0), 0) + 1;
 const STATUS = { idea: 'Idea', proposed: 'Asked 💌', planned: 'Booked', done: 'Done' };
@@ -71,21 +92,24 @@ const burst = () => {
 
 // ---- router -------------------------------------------------------------------
 const TABS = ['ask', 'calendar', 'plans', 'ideas', 'activities', 'memories'];
-let tab = 'ask', cleanup = null, painting = false, archiveQuery = '';
+let tab = 'ask', cleanup = null, painting = false, archiveQuery = '', lastHtml = '';
 function route() {
   const h = location.hash.slice(1);
   tab = TABS.includes(h) ? h : h === 'archive' ? 'memories' : 'ask';
   ['#modal', '#lightbox'].forEach(s => $(s).open && $(s).close());
-  render();
+  render(true);
   $('#view').focus({ preventScroll: true });
   scrollTo(0, 0);
 }
-function render() {
+function render(force) {
   if (painting) return; // the calendar re-renders itself when the drag ends
+  const html = VIEWS[tab]();
+  if (!force && html === lastHtml) return renderSync(); // a sync brought nothing new for this screen
+  lastHtml = html;
   cleanup?.(); cleanup = null;
-  $$('.tab').forEach(t => { const on = t.dataset.tab === tab; t.setAttribute('aria-selected', on); if (on) t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+  $$('.tab').forEach(t => { const on = t.dataset.tab === tab; t.setAttribute('aria-selected', on); if (force && on) t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
   const v = $('#view');
-  v.innerHTML = VIEWS[tab]();
+  v.innerHTML = html;
   BIND[tab]?.(v);
   hydratePhotos(v);
   tick();
@@ -100,7 +124,7 @@ function viewAsk() {
   <section class="ask">
     <div class="ask-card">
       <div class="ask-hearts" aria-hidden="true"><span>💗</span><span>💕</span><span>💖</span></div>
-      <p class="eyebrow">${esc(askPlan ? nameOf(askPlan.by) : nameOf(me()))} has a question</p>
+      <p class="eyebrow">${askPlan ? `${esc(nameOf(askPlan.by))} has a question for ${esc(nameOf(other(askPlan.by)))}` : 'A very important question'}</p>
       <h1 class="ask-q">Will you go on a date with me?</h1>
       ${askPlan ? `
       <div class="ask-plan">
@@ -376,7 +400,7 @@ function viewPlans() {
   return `
   <section class="plans">
     <div class="section-head">
-      <div><h1>Our plans</h1><p class="muted">${plural(all.filter(d => d.status === 'done').length, 'date')} together so far.</p></div>
+      <div><h1>Our plans</h1><p class="muted">${plural(all.filter(d => d.status === 'done').length, 'date')} together so far.</p>${milestoneLine() ? `<p class="milestone">${milestoneLine()}</p>` : ''}</div>
       <div class="head-actions">
         <button class="btn ghost" data-act="spin">🎲 Give me an idea</button>
         <button class="btn primary" data-act="new">+ New plan</button>
@@ -556,19 +580,20 @@ function viewMemories() {
   const done = dates().filter(d => d.status === 'done').sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   const photos = done.reduce((s, d) => s + (d.photos?.length || 0), 0);
   const rated = done.filter(d => d.rating), avg = rated.length ? (rated.reduce((s, d) => s + d.rating, 0) / rated.length).toFixed(1) : '–';
-  const together = daysTogether();
+  const together = daysTogether(), spent = done.reduce((t, d) => t + (Number(d.budget) || 0), 0);
   let lastMonth = '';
   return `
   <section class="memories">
     <div class="section-head">
       <div><h1>Our memories</h1><p class="muted">Every date we’ve been on, with the photos.</p></div>
-      <div class="head-actions"><button class="btn ghost" data-act="log-past">+ Add a past date</button></div>
+      <div class="head-actions">${photos ? '<button class="btn primary" data-act="slideshow">▶ Slideshow</button>' : ''}<button class="btn ghost" data-act="log-past">+ Add a past date</button></div>
     </div>
     <div class="stats">
       <div><b>${done.length}</b><span>dates</span></div>
       <div><b>${photos}</b><span>photos</span></div>
       <div><b>${avg}${rated.length ? '<small>★</small>' : ''}</b><span>average rating</span></div>
       <div><b>${together ?? '–'}</b><span>${together != null ? 'days together' : '<button class="linkish" data-act="settings">set your date</button>'}</span></div>
+      ${spent ? `<div><b>RM${spent.toLocaleString()}</b><span>spent on dates</span></div>` : ''}
     </div>
     ${done.length ? `<input class="search" type="search" id="memSearch" placeholder="Search memories…" value="${esc(archiveQuery)}" aria-label="Search memories">
     <ol class="timeline">${done.map((d, i) => {
@@ -640,41 +665,50 @@ $('#photoInput').addEventListener('change', async e => {
 });
 $('#captureFab').addEventListener('click', () => capture(null));
 
-// lightbox
-let lb = { key: null, i: 0 };
-function openLightbox(key, i) {
-  lb = { key, i }; showLb(); const d = $('#lightbox'); if (!d.open) d.showModal();
+// lightbox: a list of {key, id} so it can show one date's photos or a slideshow of all of them
+let lb = { list: [], i: 0, timer: null };
+const photosOf = key => (S.get(key)?.photos || []).map(id => ({ key, id }));
+function openLightbox(list, i, play = false) {
+  lb = { list, i, timer: null }; showLb();
+  const d = $('#lightbox'); if (!d.open) d.showModal();
+  setPlay(play);
+}
+function setPlay(on) {
+  clearInterval(lb.timer); lb.timer = on ? setInterval(() => { lb.i++; showLb(); }, 3500) : null;
+  const b = $('#lbPlay'); b.textContent = on ? '⏸ Pause' : '▶ Play'; b.hidden = lb.list.length < 2;
 }
 function showLb() {
-  const d = S.get(lb.key), list = d?.photos || [];
-  if (!list.length) return $('#lightbox').close();
-  lb.i = (lb.i + list.length) % list.length;
-  const img = $('#lbImg'); img.removeAttribute('src');
-  const want = list[lb.i];
-  S.photoURL(want).then(src => { if (d.photos[lb.i] === want) img.src = src; }).catch(() => toast('This photo hasn’t reached this phone yet'));
+  lb.list = lb.list.filter(p => S.get(p.key)?.photos?.includes(p.id)); // drop photos removed meanwhile
+  if (!lb.list.length) return $('#lightbox').close();
+  lb.i = (lb.i + lb.list.length) % lb.list.length;
+  const { key, id } = lb.list[lb.i], d = S.get(key), img = $('#lbImg');
+  img.removeAttribute('src');
+  S.photoURL(id).then(src => { if (lb.list[lb.i]?.id === id) img.src = src; }).catch(() => toast('This photo hasn’t reached this phone yet'));
   img.alt = `${d.title}, photo ${lb.i + 1}`;
-  $('#lbCap').textContent = `${d.emoji || ''} ${d.title} · ${lb.i + 1} of ${list.length}`;
-  $$('.lb-nav').forEach(b => { b.hidden = list.length < 2; });
+  $('#lbCap').textContent = `${d.emoji || ''} ${d.title}${d.date ? ' · ' + fmtDay(d.date, { day: 'numeric', month: 'short', year: 'numeric' }) : ''} · ${lb.i + 1} of ${lb.list.length}`;
+  $$('.lb-nav').forEach(b => { b.hidden = lb.list.length < 2; });
 }
+$('#lightbox').addEventListener('close', () => setPlay(false));
 $('#lightbox').addEventListener('click', e => {
   const a = e.target.closest('[data-lb]')?.dataset.lb;
   if (a === 'close' || e.target === e.currentTarget) return $('#lightbox').close();
-  if (a === 'prev') { lb.i--; showLb(); }
-  if (a === 'next') { lb.i++; showLb(); }
+  if (a === 'prev') { lb.i--; showLb(); setPlay(false); }
+  if (a === 'next') { lb.i++; showLb(); setPlay(false); }
+  if (a === 'play') setPlay(!lb.timer);
   if (a === 'delete') {
-    const d = S.get(lb.key);
-    S.put(lb.key, { ...d, photos: d.photos.filter((_, j) => j !== lb.i) }, `revert(moments): remove a photo from "${d.title}"`);
+    const { key, id } = lb.list[lb.i], d = S.get(key);
+    S.put(key, { ...d, photos: d.photos.filter(p => p !== id) }, `revert(moments): remove a photo from "${d.title}"`);
     showLb();
   }
 });
 addEventListener('keydown', e => {
   if (!$('#lightbox').open) return;
-  if (e.key === 'ArrowLeft') { lb.i--; showLb(); }
-  if (e.key === 'ArrowRight') { lb.i++; showLb(); }
+  if (e.key === 'ArrowLeft') { lb.i--; showLb(); setPlay(false); }
+  if (e.key === 'ArrowRight') { lb.i++; showLb(); setPlay(false); }
 });
 { let x0 = null;
   $('#lightbox').addEventListener('pointerdown', e => { x0 = e.target.closest('button') ? null : e.clientX; });
-  $('#lightbox').addEventListener('pointerup', e => { if (x0 != null && Math.abs(e.clientX - x0) > 50) { lb.i += e.clientX < x0 ? 1 : -1; showLb(); } x0 = null; });
+  $('#lightbox').addEventListener('pointerup', e => { if (x0 != null && Math.abs(e.clientX - x0) > 50) { lb.i += e.clientX < x0 ? 1 : -1; showLb(); setPlay(false); } x0 = null; });
 }
 
 // ---- global click actions -------------------------------------------------------
@@ -701,7 +735,21 @@ $('#view').addEventListener('click', e => {
     'cal-prev': () => { calCursor.setMonth(calCursor.getMonth() - 1); render(); },
     'cal-next': () => { calCursor.setMonth(calCursor.getMonth() + 1); render(); },
     'cal-today': () => { calCursor = new Date(); calCursor.setDate(1); render(); },
-    'plan-on': () => openDateForm({ date: btn.dataset.day, status: 'planned' }),
+    'plan-on': () => {
+      const day = btn.dataset.day, undated = dates().filter(x => !x.date && (x.status === 'planned' || x.status === 'proposed'));
+      if (!undated.length) return openDateForm({ date: day, status: 'planned' });
+      const m = openModal(`
+        <h2>${fmtDay(day, LONG)}</h2>
+        <p class="muted">Put one of these on this day, or plan something new.</p>
+        <div class="share-grid">${undated.map(x => `<button class="btn" data-pick="${esc(x.key)}">${esc(x.emoji || '💖')} ${esc(x.title)}</button>`).join('')}
+          <button class="btn ghost" data-pick="">+ Something new</button></div>`);
+      m.onclick = e => {
+        const b = e.target.closest('[data-pick]'); if (!b) return;
+        if (!b.dataset.pick) return openDateForm({ date: day, status: 'planned' });
+        const x = S.get(b.dataset.pick);
+        S.put(b.dataset.pick, { ...x, date: day }, `feat(plans): "${x.title}" on ${day}`); m.close(); toast(`📅 ${x.title} is on ${fmtDay(day)}`);
+      };
+    },
     weekends: () => {
       const t = today(); let c = 0;
       monthDays().forEach(dt => { const ds = isoDay(dt); if ((dt.getDay() === 0 || dt.getDay() === 6) && ds >= t && !isFree(me(), ds)) { S.put(`free:${me()}:${ds}`, { v: true }, null, true); c++; } });
@@ -725,7 +773,11 @@ $('#view').addEventListener('click', e => {
     ship: () => { S.put(key, { ...d, status: 'done' }, `feat(memories): "${d.title}" 💖`); burst(); toast('💖 Saved to memories'); openDateForm({ ...S.get(key), key }, true); },
     capture: () => capture(key),
     share: () => openShare(d),
-    photo: () => openLightbox(key, Number(btn.dataset.i)),
+    photo: () => openLightbox(photosOf(key), Number(btn.dataset.i)),
+    slideshow: () => {
+      const all = dates().filter(x => x.status === 'done').sort((a, b) => (a.date || '').localeCompare(b.date || '')).flatMap(x => photosOf(x.key));
+      if (all.length) openLightbox(all, 0, true);
+    },
     delete: () => {
       openModal(`<h2>Delete this?</h2><p class="muted">“${esc(d.title)}”${d.photos?.length ? ` and its ${plural(d.photos.length, 'photo')}` : ''} will be removed for both of you.</p>
         <div class="actions"><button class="btn ghost" data-close>Keep it</button><button class="btn danger-solid" id="confirmDel">Delete</button></div>`);
