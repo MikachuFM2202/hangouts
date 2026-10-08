@@ -355,6 +355,7 @@ function card(d) {
       ${d.status === 'proposed' ? `<a class="btn small" href="#ask">💌 See the question</a>` : ''}
       ${d.status === 'planned' ? `<button class="btn small" data-act="capture">📸 Add photos</button>` : ''}
       ${d.link ? `<a class="btn small ghost" href="${esc(d.link)}" target="_blank" rel="noopener">Open ↗</a>` : ''}
+      ${d.status !== 'done' ? `<button class="btn small ghost" data-act="share">📤 Share</button>` : ''}
       ${d.status === 'planned' || past ? `<button class="btn small primary" data-act="ship">We went! ✓</button>` : ''}
       <span class="spacer"></span>
       <button class="btn small ghost" data-act="edit">Edit</button>
@@ -723,6 +724,7 @@ $('#view').addEventListener('click', e => {
     },
     ship: () => { S.put(key, { ...d, status: 'done' }, `feat(memories): "${d.title}" 💖`); burst(); toast('💖 Saved to memories'); openDateForm({ ...S.get(key), key }, true); },
     capture: () => capture(key),
+    share: () => openShare(d),
     photo: () => openLightbox(key, Number(btn.dataset.i)),
     delete: () => {
       openModal(`<h2>Delete this?</h2><p class="muted">“${esc(d.title)}”${d.photos?.length ? ` and its ${plural(d.photos.length, 'photo')}` : ''} will be removed for both of you.</p>
@@ -731,6 +733,60 @@ $('#view').addEventListener('click', e => {
     },
   })[btn.dataset.act]?.();
 });
+
+
+// ---- share + calendar -------------------------------------------------------------
+/** Hand a file to the user: share sheet on phones (works in home-screen apps), download elsewhere. */
+async function saveFile(name, text, type) {
+  const file = new File([text], name, { type });
+  if (matchMedia('(pointer:coarse)').matches && navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const url = URL.createObjectURL(file);
+  Object.assign(document.createElement('a'), { href: url, download: name }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+const stamp = (d, t) => d.replace(/-/g, '') + (t ? 'T' + t.replace(':', '') + '00' : '');
+function eventTimes(d) {
+  if (!d.time) { const next = isoDay(new Date(parseDay(d.date).getTime() + 864e5)); return [stamp(d.date), stamp(next)]; }
+  const end = new Date(whenOf(d) + 2 * 36e5);
+  return [stamp(d.date, d.time), stamp(isoDay(end), `${pad(end.getHours())}:${pad(end.getMinutes())}`)];
+}
+function planText(d) {
+  return [`${d.emoji || '💖'} ${d.title}`, d.date ? `📅 ${fmtDay(d.date, LONG)}${d.time ? ', ' + fmtTime(d.time) : ''}` : '📅 Date to be decided',
+    d.place && `📍 ${d.place}`, d.notes && `📝 ${d.notes}`, d.link].filter(Boolean).join('\n');
+}
+function openShare(d) {
+  const site = location.href.split('#')[0];
+  const msg = `${d.status === 'proposed' ? 'I have a question for you 💌\n\n' : ''}${planText(d)}\n\n${site}${d.status === 'proposed' ? '#ask' : '#plans'}`;
+  let cal = '';
+  if (d.date) {
+    const [a, b] = eventTimes(d);
+    const g = new URLSearchParams({ action: 'TEMPLATE', text: `${d.emoji || ''} ${d.title}`.trim(), dates: `${a}/${b}`, details: d.notes || '', location: d.place || '', ctz: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    cal = `<a class="btn" href="https://calendar.google.com/calendar/render?${g}" target="_blank" rel="noopener">📅 Google Calendar</a>
+      <button class="btn" id="shIcs">🍎 Apple / Outlook calendar</button>`;
+  }
+  const m = openModal(`
+    <h2>Share “${esc(d.title)}”</h2>
+    <pre class="share-preview">${esc(msg)}</pre>
+    <div class="share-grid">
+      <a class="btn primary" href="https://wa.me/?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">💬 WhatsApp</a>
+      <button class="btn" id="shCopy">📋 Copy text</button>
+      ${cal || '<p class="muted small">Add a date to this plan to put it in your calendar.</p>'}
+    </div>
+    <div class="actions"><button class="btn ghost" data-close>Done</button></div>`);
+  $('#shCopy', m).onclick = async () => { try { await navigator.clipboard.writeText(msg); toast('📋 Copied'); } catch { toast('Couldn’t copy. Select the text above instead.'); } };
+  const ics = $('#shIcs', m);
+  if (ics) ics.onclick = () => {
+    const [a, b] = eventTimes(d), e = x => String(x || '').replace(/[\;,]/g, c => '\\' + c).replace(/\n/g, '\\n');
+    const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+    const dt = d.time ? ['DTSTART:' + a, 'DTEND:' + b] : ['DTSTART;VALUE=DATE:' + a, 'DTEND;VALUE=DATE:' + b];
+    const body = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//hangouts//EN', 'BEGIN:VEVENT', `UID:${d.key.replace(':', '-')}@hangouts`, 'DTSTAMP:' + now, ...dt,
+      'SUMMARY:' + e(`${d.emoji || ''} ${d.title}`.trim()), d.place && 'LOCATION:' + e(d.place), d.notes && 'DESCRIPTION:' + e(d.notes),
+      'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + e(d.title), 'TRIGGER:-PT2H', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].filter(Boolean).join('\r\n');
+    saveFile(`${d.title.replace(/[^\w\- ]+/g, '').trim() || 'date'}.ics`, body, 'text/calendar');
+  };
+}
 
 // ---- settings / identity --------------------------------------------------------
 function pickMe() {
@@ -749,18 +805,22 @@ const guessRepo = () => (location.hostname.endsWith('.github.io')
   ? `${location.hostname.split('.')[0]}/${location.pathname.split('/')[1]}` : 'MikachuFM2202/hangouts');
 
 async function openSettings() {
-  const P = people(), vault = S.isSynced() ? null : await S.fetchVault();
+  const P = people(), vault = S.isSynced() ? null : await S.fetchVault(guessRepo());
   const syncBlock = S.isSynced() ? `
       <p>✅ Both phones are connected. Last synced ${ago(S.status.last)}.${S.status.state === 'error' ? ` <span class="err">${esc(S.status.error)}</span>` : ''}</p>
-      <div class="actions left"><button type="button" class="btn ghost small" data-s="sync">Sync now</button><button type="button" class="btn ghost small danger" data-s="lock">Disconnect this phone</button></div>`
+      <div class="actions left"><button type="button" class="btn ghost small" data-s="sync">Sync now</button><button type="button" class="btn ghost small danger" data-s="lock">Disconnect this phone</button></div>
+      <details${S.status.error.includes('401') ? ' open' : ''}><summary class="small">GitHub token expired or deleted?</summary>
+        <p class="small muted">Make a new one with <a href="https://github.com/settings/personal-access-tokens/new?name=hangouts+sync&description=Lets+the+hangouts+site+save+our+plans+and+photos&expires_in=none&contents=write" target="_blank" rel="noopener">this link</a> and paste it here. The other phone picks it up automatically.</p>
+        <div class="row"><input id="sNewToken" type="password" placeholder="github_pat_…" autocomplete="off"><button type="button" class="btn small" data-s="retoken">Replace token</button></div>
+      </details>`
     : vault ? `
       <p class="muted">Enter your shared passphrase to connect this phone.</p>
       <div class="row"><input type="password" id="sPass" placeholder="Passphrase" autocomplete="current-password"><button type="button" class="btn primary small" data-s="unlock">Connect</button></div>`
     : `
       <p class="muted">Right now everything is saved on this phone only. To share it with your partner’s phone (one-time setup):</p>
       <ol class="small muted steps">
-        <li>On GitHub: Settings → Developer settings → <b>Fine-grained tokens</b> → Generate new token.</li>
-        <li>Repository access: only <b>${esc(guessRepo())}</b>. Permissions: <b>Contents → Read and write</b>.</li>
+        <li>Open <a href="https://github.com/settings/personal-access-tokens/new?name=hangouts+sync&description=Lets+the+hangouts+site+save+our+plans+and+photos&expires_in=none&contents=write" target="_blank" rel="noopener">this GitHub link</a> (name and permissions are filled in for you).</li>
+        <li>Under Repository access pick <b>Only select repositories → ${esc(guessRepo().split('/')[1])}</b>, then Generate token and copy it.</li>
         <li>Paste it below and choose a long passphrase you’ll both remember.</li>
       </ol>
       <label>Repository<input id="sRepo" value="${esc(guessRepo())}"></label>
@@ -799,11 +859,14 @@ async function openSettings() {
     const busy = async fn => { btn.disabled = true; const t = btn.textContent; btn.textContent = 'One moment…'; err(''); try { await fn(); } catch (x) { err(x.message); } finally { btn.disabled = false; btn.textContent = t; } };
     if (a === 'me') { m.close(); pickMe(); }
     if (a === 'sync') busy(async () => { await S.sync(); m.close(); toast(S.status.state === 'ok' ? '✓ Synced' : 'Couldn’t sync: ' + S.status.error); });
+    if (a === 'retoken') busy(async () => {
+      const t = $('#sNewToken', m).value.trim(); if (!t) throw new Error('Paste the new token first.');
+      await S.replaceToken(t).catch(x => { throw new Error(x.status === 401 ? 'GitHub didn’t accept that token.' : x.status === 403 || x.status === 404 ? 'That token can’t reach the repository. Check its repository access and Contents permission.' : x.message); });
+      m.close(); toast('🔐 Token replaced');
+    });
     if (a === 'lock') { S.lock(); m.close(); toast('This phone is disconnected'); render(); }
     if (a === 'export') {
-      const url = URL.createObjectURL(new Blob([S.exportItems()], { type: 'application/json' }));
-      Object.assign(document.createElement('a'), { href: url, download: `hangouts-backup-${today()}.json` }).click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      saveFile(`hangouts-backup-${today()}.json`, S.exportItems(), 'application/json');
     }
     if (a === 'unlock') busy(async () => {
       await S.unlock($('#sPass', m).value, vault).catch(() => { throw new Error('That passphrase didn’t work. Try again?'); });
@@ -841,7 +904,7 @@ addEventListener('online', () => S.sync());
 // ---- lock screen ------------------------------------------------------------------
 async function gate() {
   if (S.isSynced() || S.ls.get('localOnly', false)) return;
-  const vault = await S.fetchVault(); if (!vault) return;
+  const vault = await S.fetchVault(guessRepo()); if (!vault) return;
   const el = $('#lock'); el.hidden = false; $('#lockPass').focus();
   await new Promise(resolve => {
     $('#lockSkip').onclick = () => { S.ls.set('localOnly', true); el.hidden = true; resolve(); };

@@ -360,3 +360,7 @@ legend { font: 600 14px var(--sans); color: var(--accent-deep); padding: 0 6px; 
   .filters .chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -16px; padding-inline: 16px; }
   .filters .chips::-webkit-scrollbar { display: none; }
 }
+.share-preview { margin: 0 0 12px; padding: 12px 14px; background: var(--bg); border-radius: 12px; font: 14px/1.5 var(--sans); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30dvh; overflow: auto; }
+.share-grid { display: grid; gap: 8px; }
+details summary { cursor: pointer; color: var(--accent-deep); }
+details { display: grid; gap: 8px; }

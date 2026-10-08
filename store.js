@@ -116,7 +116,7 @@ function commitMsg() {
   return uniq.length === 1 ? uniq[0] : `${uniq[uniq.length - 1]} (+${uniq.length - 1} more)\n\n${uniq.map(m => '- ' + m).join('\n')}`;
 }
 
-let running = null, again = false;
+let running = null, again = false, retried401 = false;
 export function sync() {
   if (!isSynced()) return Promise.resolve();
   if (running) { again = true; return running; }
@@ -138,9 +138,17 @@ export function sync() {
         }
       }
       await uploadPhotos();
-      status.last = Date.now(); ls.set('lastSync', status.last);
+      status.last = Date.now(); ls.set('lastSync', status.last); retried401 = false;
       setStatus('ok');
     } catch (e) {
+      // Token rejected: the other phone may have swapped in a new one. Re-read the vault and retry once.
+      if (e.status === 401 && !retried401) {
+        const v = await fetchVault(cfg.repo, true);
+        try {
+          const secret = v && JSON.parse(td.decode(await unseal(unb64(v.ct))));
+          if (secret?.token && secret.token !== cfg.token) { cfg = secret; ls.set('sync', cfg); retried401 = true; again = true; }
+        } catch {}
+      }
       console.error('sync failed', e);
       setStatus('error', e.status === 401 ? 'token rejected (401)' : e.status === 403 ? 'token lacks access (403)'
         : e.name === 'OperationError' ? 'data sealed with another passphrase' : navigator.onLine ? e.message : 'offline');
@@ -192,8 +200,15 @@ export function photoURL(id) {
 }
 
 // ---- Vault: the GitHub token, sealed with the shared passphrase, lives in vault.json on main --
-export async function fetchVault() {
-  try { const r = await fetch('vault.json', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+// The vault is served by GitHub Pages, but Pages takes a minute to publish a new one and caches it for up
+// to 10 minutes. Fall back to the public API so a freshly created vault is visible straight away.
+export async function fetchVault(repoGuess, fresh = false) {
+  if (!fresh) try { const r = await fetch('vault.json', { cache: 'no-store' }); if (r.ok) return await r.json(); } catch {}
+  if (!repoGuess) return null;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${repoGuess}/contents/vault.json?ref=main&_=${Date.now()}`, { headers: { Accept: 'application/vnd.github.raw+json' } });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
 }
 async function adopt(k, secret) {
   key = k; cfg = secret;
@@ -224,10 +239,28 @@ export async function createVault({ pass, token, repo }) {
     await gh('');                      // token + repo sanity check
     await ensureBranch();
     const vault = { v: 1, kdf: 'PBKDF2-SHA256', iter: ITER, salt, ct: b64(await seal(te.encode(JSON.stringify(cfg)))) };
-    let sha; try { sha = (await (await gh('contents/vault.json?ref=main')).json()).sha; } catch {}
-    await putFile('vault.json', b64(te.encode(JSON.stringify(vault, null, 2))), sha, 'chore(security): seal the vault 🔐', 'main');
+    // Never overwrite an existing vault: a new salt would make all synced data unreadable.
+    const exists = await gh(`contents/vault.json?ref=main&_=${Date.now()}`).then(() => true, e => { if (e.status === 404) return false; throw e; });
+    if (exists) { const e = new Error('Sync is already set up for this site. Use your shared passphrase to connect instead.'); e.status = 409; throw e; }
+    await putFile('vault.json', b64(te.encode(JSON.stringify(vault, null, 2))), undefined, 'chore(security): seal the vault 🔐', 'main');
   } catch (e) { ({ cfg, key } = prev); throw e; }
   await adopt(k, cfg);
+  await sync();
+}
+
+/** Swap in a new GitHub token (old one expired or revoked). Same passphrase and key, so all data stays readable. */
+export async function replaceToken(token) {
+  if (!key || !cfg) throw new Error('Connect this phone first.');
+  const next = { ...cfg, token };
+  const prev = cfg; cfg = next;
+  try {
+    await gh('');
+    const j = await (await gh(`contents/vault.json?ref=main&_=${Date.now()}`)).json();
+    const vault = JSON.parse(td.decode(unb64(j.content)));
+    vault.ct = b64(await seal(te.encode(JSON.stringify(next))));
+    await putFile('vault.json', b64(te.encode(JSON.stringify(vault, null, 2))), j.sha, 'chore(security): rotate token 🔐', 'main');
+  } catch (e) { cfg = prev; throw e; }
+  ls.set('sync', cfg);
   await sync();
 }
 
