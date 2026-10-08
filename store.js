@@ -101,7 +101,7 @@ const putFile = (path, content, sha, message, branch = BRANCH) =>
 
 async function readData() {
   try {
-    const j = await (await gh(`contents/data.enc?ref=${BRANCH}`)).json();
+    const j = await (await gh(`contents/data.enc?ref=${BRANCH}&_=${Date.now()}`)).json(); // bust GitHub's 60s s-maxage
     const bytes = j.content ? unb64(j.content) : await raw('data.enc'); // >1MB files come back without content
     return { sha: j.sha, items: JSON.parse(td.decode(await unseal(bytes))) };
   } catch (e) {
