@@ -10,7 +10,7 @@ A little web app for two people: ask each other out, find days you're both free,
 | 📅 Calendar | Each of you taps the days you're free. Days you're both free turn purple. |
 | ✨ Plans | Upcoming dates, a countdown to the next one, ideas saved for later. |
 | 💡 Ideas | 156 daytime date ideas around KL (100 of them 🔥 trending), all under RM150 for two. Search, filter by type, budget and distance, save to Plans. |
-| 🎮 Activities | Watch-together sites like Scener and Teleparty, browser games, co-op games and couple apps. |
+| 🎮 Activities | 71 ways to do things together: watch-together sites like Scener and Teleparty, browser games, phone games, co-op games, couple apps and things to create or explore. Search and a Free-only filter. |
 | 📷 Memories | Past dates by month, with ratings, best moments and photos. |
 | 📸 button | Opens the camera. Photos attach to today's date. |
 

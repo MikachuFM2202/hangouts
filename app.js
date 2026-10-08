@@ -745,20 +745,24 @@ function bindIdeas(v) {
 }
 
 // ---- Activities -------------------------------------------------------------------
+let actQuery = '', actFree = false;
 function viewActivities() {
   const saved = savedTitles();
   return `
   <section class="activities">
     <div class="section-head">
-      <div><h1>Things to do together</h1><p class="muted">Watch shows in sync, play games and get closer, in the same room or miles apart.</p></div>
+      <div><h1>Things to do together</h1><p class="muted">${ACTIVITY_GROUPS.reduce((n, g) => n + g.items.length, 0)} ways to watch shows in sync, play games and get closer, in the same room or miles apart.</p></div>
     </div>
-    <div class="chips">${ACTIVITY_GROUPS.map(g => `<button class="chip" data-act="jump" data-id="${g.id}">${g.title}</button>`).join('')}</div>
+    <div class="filters">
+      <input class="search" type="search" id="actSearch" placeholder="Search… (drawing, Netflix, puzzle)" value="${esc(actQuery)}" aria-label="Search activities">
+      <div class="chips"><button class="chip" data-act="act-free" aria-pressed="${actFree}">🆓 Free only</button>${ACTIVITY_GROUPS.map(g => `<button class="chip" data-act="jump" data-id="${g.id}">${g.title}</button>`).join('')}</div>
+    </div>
     ${ACTIVITY_GROUPS.map((g, gi) => `
     <div class="act-group" id="grp-${g.id}">
       <h2 class="col-title">${g.title}</h2>
       <p class="muted group-blurb">${esc(g.blurb)}</p>
       <div class="act-grid">${g.items.map((a, ii) => `
-        <article class="act">
+        <article class="act" data-free="${/^free/i.test(a.cost) ? 1 : 0}" data-text="${esc([a.name, a.what, a.on, a.cost, g.title].join(' ').toLowerCase())}">
           <div class="a-top"><span class="c-emoji">${a.e}</span><div><h3>${esc(a.name)}</h3><div class="muted small">${esc(a.cost)} · ${esc(a.on)}</div></div></div>
           <p>${esc(a.what)}</p>
           <div class="card-actions">
@@ -767,7 +771,21 @@ function viewActivities() {
           </div>
         </article>`).join('')}</div>
     </div>`).join('')}
+    <p class="empty" id="noActs" hidden>Nothing matches. Try another word.</p>
   </section>`;
+}
+function bindActivities(v) {
+  const filter = () => {
+    const q = actQuery.trim().toLowerCase(); let hits = 0;
+    $$('.act-group', v).forEach(grp => {
+      let n = 0;
+      $$('.act', grp).forEach(el => { const on = (!actFree || el.dataset.free === '1') && (!q || el.dataset.text.includes(q)); el.hidden = !on; n += on; });
+      grp.hidden = !n; hits += n;
+    });
+    $('#noActs', v).hidden = hits > 0;
+  };
+  $('#actSearch', v).addEventListener('input', e => { actQuery = e.target.value; filter(); });
+  filter();
 }
 
 // ---- Memories ---------------------------------------------------------------------
@@ -936,6 +954,7 @@ $('#view').addEventListener('click', e => {
     idist: () => { ideaDist = btn.dataset.v; render(); },
     'save-idea': () => { saveIdea(ideaFromRow(DATE_IDEAS[btn.dataset.i])); render(); },
     'save-act': () => { const a = ACTIVITY_GROUPS[btn.dataset.g].items[btn.dataset.i]; saveIdea({ emoji: a.e, title: a.name, notes: a.what, link: a.url }); render(); },
+    'act-free': () => { actFree = !actFree; render(); },
     jump: () => $('#grp-' + btn.dataset.id)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' }),
     'copy-invite': async () => {
       const url = location.href.split('#')[0] + '#ask';
@@ -1235,7 +1254,7 @@ S.onChange(what => {
 addEventListener('hashchange', () => setTimeout(noteAlert));
 addEventListener('hashchange', route);
 const VIEWS = { ask: viewAsk, calendar: viewCalendar, plans: viewPlans, ideas: viewIdeas, activities: viewActivities, memories: viewMemories };
-const BIND = { ask: bindAsk, calendar: bindCalendar, ideas: bindIdeas, memories: bindMemories };
+const BIND = { ask: bindAsk, calendar: bindCalendar, ideas: bindIdeas, activities: bindActivities, memories: bindMemories };
 
 await S.init();
 route();

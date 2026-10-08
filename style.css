@@ -440,3 +440,17 @@ html.noscroll .ib-icon img { width: 34px; height: 34px; }
 .pm-item[aria-pressed="true"] .pm-x { background: var(--danger); color: #fff; }
 .pm-foot { display: flex; gap: 8px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
 .lb-bar .btn:not(.ghost) { background: rgb(255 255 255 / .92); color: var(--text); border-color: transparent; }
+@media (max-height: 700px) {
+  html.noscroll .ask-q { font-size: clamp(1.35rem, 5dvh, 2rem); }
+  html.noscroll .ask-plan { padding: 6px 10px; gap: 10px; }
+  html.noscroll .ask-plan .muted { display: none; }
+  html.noscroll .ap-emoji { font-size: 1.5rem; }
+  html.noscroll .ask-arena { min-height: 56px; gap: 12px; }
+  html.noscroll .btn.yes, html.noscroll .btn.no { padding: 10px 24px; font-size: 17px; }
+  html.noscroll .tally { min-height: 0; font-size: 14px; }
+}
+@media (max-width: 360px) {
+  .brand { display: none; }
+  .tab { padding: 6px 5px; font-size: 16px; }
+  .topbar { gap: 4px; }
+}
