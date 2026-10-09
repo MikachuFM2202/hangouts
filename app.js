@@ -1001,7 +1001,8 @@ async function onPhotos(e) {
 }
 $('#photoInput').addEventListener('change', onPhotos);
 $('#cameraInput').addEventListener('change', onPhotos);
-$('#captureFab').addEventListener('click', () => { photoTarget = null; $('#cameraInput').click(); });
+$('#captureFab').addEventListener('click', () => { photoTarget = null; }); // the label itself opens #cameraInput
+$('#captureFab').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); photoTarget = null; $('#cameraInput').click(); } });
 
 // lightbox: a list of {key, id} so it can show one date's photos or a slideshow of all of them
 let lb = { list: [], i: 0, timer: null };

@@ -313,7 +313,10 @@ legend { font: 600 14px var(--sans); color: var(--accent-deep); padding: 0 6px; 
   width: 60px; height: 60px; border-radius: 50%; border: 0; font-size: 26px; cursor: pointer;
   background: var(--accent); color: var(--accent-ink); box-shadow: 0 10px 26px color-mix(in srgb, var(--accent) 45%, transparent);
   transition: transform .2s cubic-bezier(.34, 1.56, .64, 1);
+  display: grid; place-items: center; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
 }
+/* in the DOM but invisible: some iPhones won't open a picker for a display:none input */
+.file-input { position: fixed; left: -100px; top: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 .fab:hover { transform: scale(1.08) rotate(-6deg); }
 .toasts { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(92px + env(safe-area-inset-bottom, 0px)); z-index: 60; display: grid; gap: 8px; justify-items: center; width: min(92vw, 420px); pointer-events: none; }
 .toast { background: var(--surface); color: var(--text); font-size: 15px; font-weight: 500; padding: 11px 18px; border-radius: 999px; border: 1px solid var(--line); box-shadow: var(--shadow); animation: up .3s cubic-bezier(.22, 1, .36, 1); text-align: center; overflow-wrap: anywhere; }
@@ -420,8 +423,8 @@ html.noscroll .ib-icon img { width: 34px; height: 34px; }
 }
 @media (max-width: 640px) {
   /* keep the 📸 button clear of the notes strip and the small links */
-  html.noscroll .fab { width: 50px; height: 50px; font-size: 22px; right: 14px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
-  html.noscroll .love-fab { width: 50px; min-width: 50px; height: 50px; left: 14px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  html.noscroll .fab { width: 50px; height: 50px; font-size: 22px; right: 14px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); } /* not lower: iPhone Safari takes taps at the very bottom for its toolbar */
+  html.noscroll .love-fab { width: 50px; min-width: 50px; height: 50px; left: 14px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
   html.noscroll .love-fab .lf-heart { font-size: 22px; }
   html.noscroll .ask-foot { min-height: 52px; justify-content: center; align-content: center; padding: 0 60px; }
 }
