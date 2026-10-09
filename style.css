@@ -454,3 +454,5 @@ html.noscroll .ib-icon img { width: 34px; height: 34px; }
   .tab { padding: 6px 5px; font-size: 16px; }
   .topbar { gap: 4px; }
 }
+.wk-ev p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ev-day { display: grid; gap: 8px; }

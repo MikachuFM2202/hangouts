@@ -213,7 +213,7 @@ const burst = () => {
 };
 
 // ---- router -------------------------------------------------------------------
-const TABS = ['ask', 'calendar', 'plans', 'ideas', 'activities', 'memories'];
+const TABS = ['ask', 'calendar', 'plans', 'ideas', 'week', 'activities', 'memories'];
 let tab = 'ask', cleanup = null, painting = false, archiveQuery = '', lastHtml = '';
 function route() {
   const h = location.hash.slice(1);
@@ -516,7 +516,7 @@ function bindCalendar(v) {
 // ---- Plans ----------------------------------------------------------------------
 const thumb = (key, id, i) => `<button class="thumb" data-act="photo" data-key="${esc(key)}" data-i="${i}"><img data-photo="${esc(id)}" alt="Photo ${i + 1}" loading="lazy"></button>`;
 function card(d) {
-  const past = d.date && d.date < today() && d.status !== 'done';
+  const past = d.date && d.date < today() && (d.status === 'planned' || d.status === 'proposed');
   const photos = pics(d.key);
   return `
   <article class="card st-${d.status}${past ? ' overdue' : ''}" data-key="${esc(d.key)}">
@@ -691,9 +691,9 @@ async function spin() {
 
 // ---- Ideas ------------------------------------------------------------------------
 const savedTitles = () => new Set(dates().filter(d => d.status !== 'done').map(d => d.title.toLowerCase()));
-function saveIdea({ emoji, title, notes, link, place }) {
+function saveIdea({ emoji, title, notes, link, place, date, time }) {
   if (savedTitles().has(title.toLowerCase())) return toast('Already in your plans 💕');
-  S.put('date:' + S.uid(), { emoji, title, notes, link, place, status: 'idea', by: me(), n: nextN(), photos: [] }, `feat(ideas): save "${title}" ${emoji}`);
+  S.put('date:' + S.uid(), { emoji, title, notes, link, place, date, time, status: 'idea', by: me(), n: nextN(), photos: [] }, `feat(ideas): save "${title}" ${emoji}`);
   toast('💡 Saved to Plans › Ideas for later');
 }
 let ideaCat = 'hot', ideaCost = 'all', ideaDist = 'all';
@@ -742,6 +742,93 @@ function bindIdeas(v) {
     $('#noIdeas', v).hidden = hits > 0;
   };
   $('#ideaSearch', v).addEventListener('input', e => { ideaQuery = e.target.value; filter(); });
+  filter();
+}
+
+// ---- This week ---------------------------------------------------------------------
+// events.json lives on the `events` branch. A GitHub Action (scripts/events.py) refreshes it every morning,
+// and the Find button asks it to run right away.
+let week = null, weekAt = 0, weekErr = '', weekBusy = false, weekQuery = '', weekDaytime = false, weekEnd = false;
+const evTitle = e => e.name.slice(0, 80);
+async function loadWeek() {
+  weekAt = Date.now();
+  try {
+    const r = await fetch(`https://raw.githubusercontent.com/${S.repo() || guessRepo()}/events/events.json?_=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    week = await r.json(); weekErr = '';
+  } catch { weekErr = navigator.onLine ? 'Couldn’t load this week’s events.' : 'You’re offline.'; }
+  if (tab === 'week') render();
+}
+async function findWeek() {
+  if (weekBusy) return;
+  const before = week?.updated || 0;
+  weekBusy = true; render();
+  try {
+    if (!(await S.findEvents())) { await loadWeek(); return toast('The list refreshes every morning. Connect your phones in ⚙ to search any time.', 5000); }
+    toast('🔎 Searching KL… this takes about a minute');
+    for (let i = 0; i < 18; i++) { // the Action takes 30–90s; give up after 3 minutes
+      await sleep(10000);
+      await loadWeek();
+      if ((week?.updated || 0) > before) return toast(`🎟️ Found ${plural(week.events.length, 'event')} this week`);
+    }
+    toast('Still searching. Check back in a few minutes.');
+  } catch (e) {
+    toast(e.status === 403 || e.status === 404 ? 'Your GitHub token can’t start the search. It needs Contents: Read and write.' : 'Couldn’t start the search. Try again?', 5000);
+  } finally { weekBusy = false; render(); }
+}
+const isDaytime = e => e.time && e.time >= '07:00' && e.time < '18:00';
+const isWeekend = ds => [0, 6].includes(parseDay(ds).getDay());
+function viewWeek() {
+  const t = today(), saved = savedTitles();
+  const list = (week?.events || []).filter(e => (e.end_date || e.date) >= t); // the file is made at 6am; drop what's already over
+  const days = {};
+  list.forEach(e => (days[e.date < t ? t : e.date] ||= []).push(e)); // multi-day events that started earlier sit under today
+  const findBtn = `<button class="btn primary" data-act="week-find" ${weekBusy ? 'disabled' : ''}>${weekBusy ? '🔎 Searching…' : '🔎 Find new events'}</button>`;
+  return `
+  <section class="week">
+    <div class="section-head">
+      <div><h1>Happening this week</h1><p class="muted">Events in KL and nearby, within about an hour of ${esc(HOME)}. ${week ? `Updated ${ago(week.updated)} from ${esc(week.source)}.` : ''}</p></div>
+      <div class="head-actions">${findBtn}</div>
+    </div>
+    ${!week ? `<p class="empty">${weekErr ? `${esc(weekErr)} <button class="linkish" data-act="week-find">Try again</button>` : 'Loading this week’s events…'}</p>` : `
+    <div class="filters">
+      <input class="search" type="search" id="weekSearch" placeholder="Search events… (music, yoga, Bangsar)" value="${esc(weekQuery)}" aria-label="Search events">
+      <div class="chips"><button class="chip" data-act="week-day" aria-pressed="${weekDaytime}">☀️ Daytime</button><button class="chip" data-act="week-end" aria-pressed="${weekEnd}">🗓️ Weekend</button></div>
+    </div>
+    ${Object.entries(days).sort(([a], [b]) => a.localeCompare(b)).map(([ds, evs]) => `
+    <div class="ev-day" data-day="${ds}">
+      <h2 class="col-title">${ds === t ? 'Today' : fmtDay(ds, LONG)}</h2>
+      ${wxLine(ds)}
+      <div class="act-grid">${evs.map(e => `
+        <article class="act wk-ev" data-daytime="${isDaytime(e) ? 1 : 0}" data-text="${esc([e.name, e.venue, e.area, e.cat, e.summary].join(' ').toLowerCase())}">
+          <div class="a-top"><span class="c-emoji">${esc(e.emoji)}</span><div><h3>${esc(e.name)}</h3>
+            <div class="muted small">${e.time ? fmtTime(e.time) : 'All day'}${e.end_date > e.date ? ` · until ${fmtDay(e.end_date)}` : ''} · ~${e.km} km away</div></div></div>
+          ${e.summary ? `<p>${esc(e.summary)}</p>` : ''}
+          ${e.venue || e.area ? `<div class="i-where">${mapLink([e.venue, e.area].filter(Boolean).join(', '))}</div>` : ''}
+          ${e.cat ? `<div class="i-tags"><span class="pill">${esc(e.cat)}</span></div>` : ''}
+          <div class="card-actions">
+            <a class="btn small" href="${esc(e.url)}" target="_blank" rel="noopener">Details ↗</a>
+            <button class="btn small ghost ${saved.has(evTitle(e).toLowerCase()) ? 'saved' : ''}" data-act="save-ev" data-id="${esc(e.id)}">${saved.has(evTitle(e).toLowerCase()) ? '✓ In plans' : '+ Add to plans'}</button>
+          </div>
+        </article>`).join('')}</div>
+    </div>`).join('')}
+    <p class="empty" id="noEvents" hidden>${list.length ? 'Nothing matches. Try another word or turn off a filter.' : 'No events found for this week yet. Tap Find new events.'}</p>`}
+  </section>`;
+}
+function bindWeek(v) {
+  if (Date.now() - weekAt > 30 * 6e4) loadWeek(); // first visit, or the app sat open for a while
+  const s = $('#weekSearch', v); if (!s) return;
+  const filter = () => {
+    const q = weekQuery.trim().toLowerCase(); let hits = 0;
+    $$('.ev-day', v).forEach(day => {
+      let n = 0;
+      const dayOk = !weekEnd || isWeekend(day.dataset.day);
+      $$('.wk-ev', day).forEach(el => { const on = dayOk && (!weekDaytime || el.dataset.daytime === '1') && (!q || el.dataset.text.includes(q)); el.hidden = !on; n += on; });
+      day.hidden = !n; hits += n;
+    });
+    $('#noEvents', v).hidden = hits > 0;
+  };
+  s.addEventListener('input', e => { weekQuery = e.target.value; filter(); });
   filter();
 }
 
@@ -956,6 +1043,10 @@ $('#view').addEventListener('click', e => {
     'save-idea': () => { saveIdea(ideaFromRow(DATE_IDEAS[btn.dataset.i])); render(); },
     'save-act': () => { const a = ACTIVITY_GROUPS[btn.dataset.g].items[btn.dataset.i]; saveIdea({ emoji: a.e, title: a.name, notes: a.what, link: a.url }); render(); },
     'act-free': () => { actFree = !actFree; render(); },
+    'week-find': findWeek,
+    'week-day': () => { weekDaytime = !weekDaytime; render(); },
+    'week-end': () => { weekEnd = !weekEnd; render(); },
+    'save-ev': () => { const e = week?.events.find(x => x.id === btn.dataset.id); if (e) saveIdea({ emoji: e.emoji, title: evTitle(e), notes: e.summary || undefined, link: e.url, place: e.venue || e.area || undefined, date: e.date, time: e.time || undefined }); render(); },
     jump: () => $('#grp-' + btn.dataset.id)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' }),
     'copy-invite': async () => {
       const url = location.href.split('#')[0] + '#ask';
@@ -1254,8 +1345,8 @@ S.onChange(what => {
 });
 addEventListener('hashchange', () => setTimeout(noteAlert));
 addEventListener('hashchange', route);
-const VIEWS = { ask: viewAsk, calendar: viewCalendar, plans: viewPlans, ideas: viewIdeas, activities: viewActivities, memories: viewMemories };
-const BIND = { ask: bindAsk, calendar: bindCalendar, ideas: bindIdeas, activities: bindActivities, memories: bindMemories };
+const VIEWS = { ask: viewAsk, calendar: viewCalendar, plans: viewPlans, ideas: viewIdeas, week: viewWeek, activities: viewActivities, memories: viewMemories };
+const BIND = { ask: bindAsk, calendar: bindCalendar, ideas: bindIdeas, week: bindWeek, activities: bindActivities, memories: bindMemories };
 
 await S.init();
 route();

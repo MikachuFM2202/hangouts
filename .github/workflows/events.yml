@@ -1,0 +1,22 @@
+# Refreshes events.json (the "This week" tab) on the `events` branch.
+# Runs every morning, and whenever the site's "Find events" button sends a repository_dispatch.
+name: events
+on:
+  schedule: [{ cron: '0 22 * * *' }]   # 6am in KL
+  workflow_dispatch:
+  repository_dispatch: { types: [events] }
+permissions: { contents: write }
+concurrency: { group: events, cancel-in-progress: false }
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/events.py --check && python3 scripts/events.py > "$RUNNER_TEMP/events.json"
+      # One commit, force-pushed: the branch only ever holds the latest list. Never touches main or data.
+      - run: |
+          cd "$RUNNER_TEMP" && git init -q -b events out && mv events.json out/ && cd out
+          git add events.json
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -qm 'chore(events): this week in KL 🎟️'
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" events
