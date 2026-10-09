@@ -479,11 +479,12 @@ function viewCalendar() {
   </section>`;
 }
 function whatsOn(evs) {
-  const days = Object.entries(evs), saved = savedTitles();
+  const ym = `${calCursor.getFullYear()}-${pad(calCursor.getMonth() + 1)}`, month = calCursor.toLocaleDateString(undefined, { month: 'long' });
+  const days = Object.entries(evs).filter(([ds]) => ds.startsWith(ym)), saved = savedTitles();
   if (!week) return '';
   return `
     <div class="panel whats-on">
-      <h3>🎟️ What’s on in KL this week</h3>
+      <h3>🎟️ What’s on in KL in ${esc(month)}</h3>
       ${days.length ? days.map(([ds, list]) => `
       <details class="wo-day" id="wo-${ds}" data-day="${ds}" ${woOpen.has(ds) ? 'open' : ''}>
         <summary><span>${ds === today() ? 'Today' : fmtDay(ds, LONG)}</span><span class="muted small">${plural(list.length, 'event')}${isFree('a', ds) && isFree('b', ds) ? ' · 💞 you’re both free' : ''}</span></summary>
@@ -491,8 +492,8 @@ function whatsOn(evs) {
           <li><span class="wo-time">${evWhen(e, ds)}</span>
             <span class="wo-name"><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.emoji)} ${esc(e.name)}</a><span class="muted small">${esc(e.venue || e.area)} · ~${e.km} km</span></span>
             <button class="btn small ghost ${saved.has(evTitle(e).toLowerCase()) ? 'saved' : ''}" data-act="save-ev" data-id="${esc(e.id)}">${saved.has(evTitle(e).toLowerCase()) ? '✓' : '+ Add'}</button></li>`).join('')}</ul>
-      </details>`).join('') : '<p class="muted">No events found for the coming days.</p>'}
-      <a class="linkish small" href="#week">Search and filter them on This week →</a>
+      </details>`).join('') : `<p class="muted">${ym < today().slice(0, 7) ? 'This month is over.' : `No events found for ${esc(month)} yet. The list covers up to ${fmtDay(isoDay(new Date(parseDay(week.to).getTime() - 864e5)))} and grows every Friday.`}</p>`}
+      <a class="linkish small" href="#week">Search and filter them on What’s on →</a>
     </div>`;
 }
 let woOpen = new Set(); // which What's on days are expanded, kept across re-renders
@@ -769,10 +770,10 @@ function bindIdeas(v) {
   filter();
 }
 
-// ---- This week ---------------------------------------------------------------------
-// events.json lives on the `events` branch. A GitHub Action (scripts/events.py) refreshes it every morning,
+// ---- What's on (the next month of events) ------------------------------------------------
+// events.json lives on the `events` branch. A GitHub Action (scripts/events.py) refreshes it every Friday at 5am,
 // and the Find button asks it to run right away.
-let week = null, weekAt = 0, weekErr = '', weekBusy = false, weekQuery = '', weekDaytime = false, weekEnd = false;
+let week = null, weekAt = 0, weekErr = '', weekBusy = false, weekQuery = '', weekDaytime = false, weekEnd = false, weekWhen = 'all';
 const evTitle = e => e.name.slice(0, 80);
 async function loadWeek() {
   weekAt = Date.now();
@@ -780,7 +781,7 @@ async function loadWeek() {
     const r = await fetch(`https://raw.githubusercontent.com/${S.repo() || guessRepo()}/events/events.json?_=${Date.now()}`, { cache: 'no-store' });
     if (!r.ok) throw new Error(r.status);
     week = await r.json(); weekErr = '';
-  } catch { weekErr = navigator.onLine ? 'Couldn’t load this week’s events.' : 'You’re offline.'; }
+  } catch { weekErr = navigator.onLine ? 'Couldn’t load the events.' : 'You’re offline.'; }
   if (tab === 'week' || tab === 'calendar') render();
 }
 async function findWeek() {
@@ -788,24 +789,25 @@ async function findWeek() {
   const before = week?.updated || 0;
   weekBusy = true; render();
   try {
-    if (!(await S.findEvents())) { await loadWeek(); return toast('The list refreshes every morning. Connect your phones in ⚙ to search any time.', 5000); }
+    if (!(await S.findEvents())) { await loadWeek(); return toast('The list refreshes every Friday morning. Connect your phones in ⚙ to search any time.', 5000); }
     toast('🔎 Searching KL… this takes about a minute');
     for (let i = 0; i < 18; i++) { // the Action takes 30–90s; give up after 3 minutes
       await sleep(10000);
       await loadWeek();
-      if ((week?.updated || 0) > before) return toast(`🎟️ Found ${plural(week.events.length, 'event')} this week`);
+      if ((week?.updated || 0) > before) return toast(`🎟️ Found ${plural(week.events.length, 'event')} for the next month`);
     }
     toast('Still searching. Check back in a few minutes.');
   } catch (e) {
     toast(e.status === 403 || e.status === 404 ? 'Your GitHub token can’t start the search. It needs Contents: Read and write.' : 'Couldn’t start the search. Try again?', 5000);
   } finally { weekBusy = false; render(); }
 }
-/** This week's events by day, from today on. One that runs several days shows on each of them. */
-function eventsByDay() {
+/** Events by day, from today on. With `spread`, one that runs several days shows on each of them (the calendar);
+ *  without, it shows once, under the day it starts or today if it already has (the list, so month-long shows don't repeat). */
+function eventsByDay(spread = true) {
   const t = today(), out = {};
   for (const e of week?.events || []) {
-    const last = e.end_date > e.date ? e.end_date : e.date;
-    for (let ds = e.date < t ? t : e.date; ds <= last && ds < week.to; ds = isoDay(new Date(parseDay(ds).getTime() + 864e5 + 36e5))) (out[ds] ||= []).push(e);
+    const first = e.date < t ? t : e.date, last = spread && e.end_date > e.date ? e.end_date : first;
+    for (let ds = first; ds <= last && ds < week.to; ds = isoDay(new Date(parseDay(ds).getTime() + 864e5 + 36e5))) (out[ds] ||= []).push(e);
   }
   Object.values(out).forEach(l => l.sort((a, b) => (a.time || '').localeCompare(b.time || '')));
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => a.localeCompare(b)));
@@ -813,19 +815,27 @@ function eventsByDay() {
 const evWhen = (e, ds) => (e.date < ds ? `On till ${e.end_date === ds ? 'today' : fmtDay(e.end_date)}` : e.time ? fmtTime(e.time) : 'All day');
 const isDaytime = e => e.time && e.time >= '07:00' && e.time < '18:00';
 const isWeekend = ds => [0, 6].includes(parseDay(ds).getDay());
+/** 'this' up to Sunday, 'next' the Monday–Sunday after, 'later' beyond. */
+function weekOf(ds) {
+  const t = parseDay(today()), sun = new Date(t); sun.setDate(t.getDate() + (7 - t.getDay()) % 7);
+  const nextSun = new Date(sun); nextSun.setDate(sun.getDate() + 7);
+  const d = parseDay(ds);
+  return d <= sun ? 'this' : d <= nextSun ? 'next' : 'later';
+}
 function viewWeek() {
   const t = today(), saved = savedTitles();
-  const days = eventsByDay();
+  const days = eventsByDay(false);
   const findBtn = `<button class="btn primary" data-act="week-find" ${weekBusy ? 'disabled' : ''}>${weekBusy ? '🔎 Searching…' : '🔎 Find new events'}</button>`;
   return `
   <section class="week">
     <div class="section-head">
-      <div><h1>Happening this week</h1><p class="muted">Events in KL and nearby, within about an hour of ${esc(HOME)}. ${week ? `Updated ${ago(week.updated)} from ${esc(week.source)}.` : ''}</p></div>
+      <div><h1>What’s on in KL</h1><p class="muted">Events for the next month in KL and nearby, within about an hour of ${esc(HOME)}. Refreshed every Friday morning${week ? `, last ${ago(week.updated)}, from ${esc(week.source)}` : ''}.</p></div>
       <div class="head-actions">${findBtn}</div>
     </div>
-    ${!week ? `<p class="empty">${weekErr ? `${esc(weekErr)} <button class="linkish" data-act="week-find">Try again</button>` : 'Loading this week’s events…'}</p>` : `
+    ${!week ? `<p class="empty">${weekErr ? `${esc(weekErr)} <button class="linkish" data-act="week-find">Try again</button>` : 'Loading events…'}</p>` : `
     <div class="filters">
       <input class="search" type="search" id="weekSearch" placeholder="Search events… (music, yoga, Bangsar)" value="${esc(weekQuery)}" aria-label="Search events">
+      <div class="chips" role="group" aria-label="When">${[['all', 'Next month'], ['this', 'This week'], ['next', 'Next week'], ['later', 'Later']].map(([k, l]) => `<button class="chip" data-act="week-when" data-v="${k}" aria-pressed="${weekWhen === k}">${l}</button>`).join('')}</div>
       <div class="chips"><button class="chip" data-act="week-day" aria-pressed="${weekDaytime}">☀️ Daytime</button><button class="chip" data-act="week-end" aria-pressed="${weekEnd}">🗓️ Weekend</button></div>
     </div>
     ${Object.entries(days).map(([ds, evs]) => `
@@ -845,7 +855,7 @@ function viewWeek() {
           </div>
         </article>`).join('')}</div>
     </div>`).join('')}
-    <p class="empty" id="noEvents" hidden>${Object.keys(days).length ? 'Nothing matches. Try another word or turn off a filter.' : 'No events found for this week yet. Tap Find new events.'}</p>`}
+    <p class="empty" id="noEvents" hidden>${Object.keys(days).length ? 'Nothing matches. Try another word or turn off a filter.' : 'No events found yet. Tap Find new events.'}</p>`}
   </section>`;
 }
 function bindWeek(v) {
@@ -855,7 +865,7 @@ function bindWeek(v) {
     const q = weekQuery.trim().toLowerCase(); let hits = 0;
     $$('.ev-day', v).forEach(day => {
       let n = 0;
-      const dayOk = !weekEnd || isWeekend(day.dataset.day);
+      const dayOk = (!weekEnd || isWeekend(day.dataset.day)) && (weekWhen === 'all' || weekOf(day.dataset.day) === weekWhen);
       $$('.wk-ev', day).forEach(el => { const on = dayOk && (!weekDaytime || el.dataset.daytime === '1') && (!q || el.dataset.text.includes(q)); el.hidden = !on; n += on; });
       day.hidden = !n; hits += n;
     });
@@ -1166,6 +1176,7 @@ $('#view').addEventListener('click', e => {
     'week-find': findWeek,
     'wo-open': () => { const el = $('#wo-' + btn.dataset.day); if (el) { el.open = true; el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' }); } },
     'week-day': () => { weekDaytime = !weekDaytime; render(); },
+    'week-when': () => { weekWhen = btn.dataset.v; render(); },
     'week-end': () => { weekEnd = !weekEnd; render(); },
     'save-ev': () => { const e = week?.events.find(x => x.id === btn.dataset.id); if (e) saveIdea({ emoji: e.emoji, title: evTitle(e), notes: e.summary || undefined, link: e.url, place: e.venue || e.area || undefined, date: e.date, time: e.time || undefined }); render(); },
     jump: () => $('#grp-' + btn.dataset.id)?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' }),

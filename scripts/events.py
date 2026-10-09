@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Find events in and around KL for the next 7 days and print them as JSON (the "This week" tab).
+"""Find events in and around KL for the next month and print them as JSON (the "What's on" tab).
 
 Sources, merged and de-duplicated. Any one may fail; the run only fails if all of them do.
 - Eventbrite's KL listing pages. Its firewall blocks GitHub's servers, so this only works from a home connection.
@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 HOME = (3.205, 101.735)            # Altris Residence, Wangsa Maju
 MAX_KM = 60                        # roughly an hour's drive
 MYT = timezone(timedelta(hours=8))
+DAYS = 31                          # how far ahead to look; the workflow refreshes every Friday
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129 Safari/537.36'
 SKIP = re.compile(r'webinar|training course|hrd[fc]|recruitment|networking|conference|summit|seminar|congress|forum|\bmba\b|online|atas talian|kursus|open day', re.I)
 EMOJI = {'Music': '🎵', 'Food & Drink': '🍜', 'Performing & Visual Arts': '🎨', 'Health & Wellness': '💆', 'Sports & Fitness': '🏃',
@@ -89,7 +90,7 @@ def eventbrite_one(r, start, end):
 
 
 def eventbrite(start, end):
-    for page in ['this-week', 'next-week']:  # next-week fills in the days after Sunday
+    for page in ['this-week', 'next-week', 'this-month', 'next-month']:  # the month pages only list some events, so take the week ones too
         n, total = 1, 1
         while n <= min(total, 5):
             rs, total = eventbrite_results(fetch(f'https://www.eventbrite.com/d/malaysia--kuala-lumpur/events--{page}/?page={n}'))
@@ -118,9 +119,15 @@ def meetup_one(e, start, end):
 
 
 def meetup(start, end):
-    q = f'customStartDate={start}T00%3A00%3A00%2B08%3A00&customEndDate={end}T00%3A00%3A00%2B08%3A00'
-    page = fetch(f'https://www.meetup.com/find/?location=my--Kuala%20Lumpur&source=EVENTS&eventType=inPerson&{q}')
-    yield from (meetup_one(e, start, end) for e in meetup_results(page))
+    # one search returns ~20 events, so ask a week at a time
+    day = datetime.strptime(start, '%Y-%m-%d')
+    while day.strftime('%Y-%m-%d') < end:
+        a, b = day.strftime('%Y-%m-%d'), min((day + timedelta(days=7)).strftime('%Y-%m-%d'), end)
+        q = f'customStartDate={a}T00%3A00%3A00%2B08%3A00&customEndDate={b}T00%3A00%3A00%2B08%3A00'
+        page = fetch(f'https://www.meetup.com/find/?location=my--Kuala%20Lumpur&source=EVENTS&eventType=inPerson&{q}')
+        yield from (meetup_one(e, start, end) for e in meetup_results(page))
+        day += timedelta(days=7)
+        time.sleep(1)
 
 
 # ---- allevents.in -----------------------------------------------------------------------------
@@ -146,7 +153,7 @@ def allevents(start, end):
         raise ValueError('no client token on the allevents page')
     hdr = {'Content-Type': 'application/json', 'X-Client-State': token.group(1), 'Origin': 'https://allevents.in', 'Referer': 'https://allevents.in/kuala-lumpur/this-week'}
     for popular in (False, True):
-        for n in range(1, 7):
+        for n in range(1, 9):
             body = {'city': 'kuala lumpur', 'country': 'malaysia', 'page': n, 'rows': 46, 'popular': popular, 'venue': [], 'keywords': '', 'type': '', 'ids': [], 'sdate': '', 'edate': ''}
             rows = json.loads(fetch('https://allevents.in/api/events/list', json.dumps(body).encode(), hdr)).get('data') or []
             yield from (allevents_one(x, start, end) for x in rows)
@@ -159,7 +166,7 @@ SOURCES = {'Eventbrite': eventbrite, 'Meetup': meetup, 'allevents': allevents}
 
 
 def collect(now):
-    start, end = now.strftime('%Y-%m-%d'), (now + timedelta(days=7)).strftime('%Y-%m-%d')
+    start, end = now.strftime('%Y-%m-%d'), (now + timedelta(days=DAYS)).strftime('%Y-%m-%d')
     seen, out, used = set(), [], []
     for name, source in SOURCES.items():
         try:

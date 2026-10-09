@@ -1,8 +1,8 @@
-# Refreshes events.json (the "This week" tab) on the `events` branch.
-# Runs every morning, and whenever the site's "Find events" button sends a repository_dispatch.
+# Refreshes events.json (the "What's on" tab: the next month of events) on the `events` branch.
+# Runs every Friday at 5am KL time, and whenever the site's "Find new events" button sends a repository_dispatch.
 name: events
 on:
-  schedule: [{ cron: '0 22 * * *' }]   # 6am in KL
+  schedule: [{ cron: '0 21 * * 4' }]   # Friday 5am in KL (Thursday 21:00 UTC); GitHub may start it a little late
   workflow_dispatch:
   repository_dispatch: { types: [events] }
 permissions: { contents: write }
@@ -10,7 +10,7 @@ concurrency: { group: events, cancel-in-progress: false }
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - run: python3 scripts/events.py --check && python3 scripts/events.py > "$RUNNER_TEMP/events.json"
@@ -18,5 +18,5 @@ jobs:
       - run: |
           cd "$RUNNER_TEMP" && git init -q -b events out && mv events.json out/ && cd out
           git add events.json
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -qm 'chore(events): this week in KL 🎟️'
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -qm "chore(events): what's on in KL 🎟️"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" events
