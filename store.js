@@ -267,12 +267,13 @@ export async function replaceToken(token) {
   await sync();
 }
 
-/** Ask the events workflow to look for new events now. Needs the same Contents: write token as sync. */
-export async function findEvents() {
+/** Start a workflow (events.yml, notify.yml) with a repository_dispatch. Needs the same Contents: write token as sync. */
+export async function dispatch(type, payload = {}) {
   if (!isSynced()) return false;
-  await gh('dispatches', { method: 'POST', body: JSON.stringify({ event_type: 'events' }) });
+  await gh('dispatches', { method: 'POST', body: JSON.stringify({ event_type: type, client_payload: payload }) });
   return true;
 }
+export const findEvents = () => dispatch('events');
 
 async function ensureBranch() {
   try { await gh(`git/ref/heads/${BRANCH}`); return; } catch (e) { if (e.status !== 404) throw e; }

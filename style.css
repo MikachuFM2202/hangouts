@@ -421,7 +421,9 @@ html.noscroll .ib-icon img { width: 34px; height: 34px; }
 @media (max-width: 640px) {
   /* keep the 📸 button clear of the notes strip and the small links */
   html.noscroll .fab { width: 50px; height: 50px; font-size: 22px; right: 14px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
-  html.noscroll .ask-foot { min-height: 52px; justify-content: flex-start; align-content: center; padding: 0 64px 0 4px; }
+  html.noscroll .love-fab { width: 50px; min-width: 50px; height: 50px; left: 14px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  html.noscroll .love-fab .lf-heart { font-size: 22px; }
+  html.noscroll .ask-foot { min-height: 52px; justify-content: center; align-content: center; padding: 0 60px; }
 }
 .wx { font-size: 13px; color: var(--muted); }
 .hero .wx { margin-top: 2px; }
@@ -484,3 +486,67 @@ html.noscroll .ib-icon img { width: 34px; height: 34px; }
   .wo-list li { grid-template-columns: 42px 1fr auto; gap: 8px; }
   .wo-time { font-size: 12px; }
 }
+
+/* ---------- I love you ---------- */
+.love-fab {
+  --heat: 0;
+  position: fixed; left: 18px; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); z-index: 25;
+  height: 60px; min-width: 60px; padding: 0 22px 0 16px; border-radius: 999px; border: 0; cursor: pointer;
+  display: flex; align-items: center; gap: 8px; font: 700 16px var(--sans); color: #fff;
+  background: linear-gradient(135deg, #ff7aa8, var(--accent) 55%, #d63a8a);
+  box-shadow: 0 10px 26px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 calc(var(--heat) * 46px) calc(var(--heat) * 10px) color-mix(in srgb, #ff4f9a 70%, transparent);
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none;
+  transition: box-shadow .3s;
+}
+.love-fab .lf-heart { font-size: 26px; display: inline-block; animation: beat 1.6s ease-in-out infinite; }
+.love-fab.busy .lf-heart { animation-duration: .45s; }
+.love-fab:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 3px; }
+.lf-count {
+  position: absolute; left: 50%; bottom: calc(100% + 8px); translate: -50% 0; padding: 4px 12px; border-radius: 999px;
+  background: #fff; color: var(--accent-deep); font: italic 700 18px var(--display); box-shadow: var(--shadow); white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.love-fx { position: fixed; inset: 0; pointer-events: none; z-index: 70; overflow: hidden; }
+.love-float { position: absolute; font-size: 30px; will-change: transform, opacity; filter: drop-shadow(0 4px 8px rgb(232 87 127 / .35)); }
+.love-combo { position: absolute; white-space: nowrap; font: italic 700 22px var(--display); color: var(--accent-deep); text-shadow: 0 2px 0 #fff, 0 0 18px #fff; }
+.love-ring { position: absolute; width: 70px; height: 70px; border-radius: 50%; border: 3px solid var(--accent); }
+@media (max-width: 640px) {
+  .love-fab { width: 60px; padding: 0; justify-content: center; }
+  .love-fab .lf-text { display: none; }
+  .lf-count { left: 0; translate: 0 0; }
+}
+
+.love-show { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 24px; cursor: pointer;
+  background: radial-gradient(circle at 50% 42%, rgb(255 214 230 / .82), rgb(232 87 127 / .55) 70%); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  animation: ls-in .45s ease-out both; overflow: hidden; }
+.love-show.out { animation: ls-out .45s ease-in both; }
+@keyframes ls-in { from { opacity: 0; backdrop-filter: blur(0); } }
+@keyframes ls-out { to { opacity: 0; transform: scale(1.04); } }
+.ls-card { position: relative; text-align: center; display: grid; justify-items: center; gap: 2px; color: #fff; text-shadow: 0 1px 2px rgb(150 30 70 / .45), 0 2px 18px rgb(201 61 102 / .6); }
+.ls-heart { font-size: clamp(110px, 32vw, 170px); line-height: 1; animation: ls-pop .9s cubic-bezier(.34, 1.56, .64, 1) both; }
+.ls-heart span { display: inline-block; animation: ls-beat 1.1s ease-in-out .9s infinite; filter: drop-shadow(0 18px 40px rgb(201 61 102 / .55)); }
+@keyframes ls-pop { 0% { transform: scale(0) rotate(-25deg); opacity: 0; } 60% { transform: scale(1.18) rotate(6deg); opacity: 1; } 100% { transform: scale(1) rotate(0); } }
+@keyframes ls-beat { 0%, 100% { transform: scale(1); } 14% { transform: scale(1.14); } 28% { transform: scale(1); } 42% { transform: scale(1.1); } 70% { transform: scale(1); } }
+.ls-from { margin: 10px 0 0; font: 700 1rem var(--sans); letter-spacing: .14em; text-transform: uppercase; animation: ls-rise .6s .35s cubic-bezier(.22, 1, .36, 1) both; }
+.ls-title { margin: 0; font: italic 600 clamp(2.6rem, 11vw, 4rem)/1 var(--display); animation: ls-rise .7s .45s cubic-bezier(.22, 1, .36, 1) both; }
+.ls-count { font: italic 700 clamp(3rem, 16vw, 5.5rem)/1.1 var(--display); font-variant-numeric: tabular-nums; animation: ls-rise .7s .55s cubic-bezier(.22, 1, .36, 1) both; }
+.ls-count.done { animation: ls-thump .5s cubic-bezier(.34, 1.56, .64, 1); }
+@keyframes ls-thump { 40% { transform: scale(1.22); } }
+@keyframes ls-rise { from { opacity: 0; transform: translateY(24px) scale(.96); } }
+.ls-sub { margin: 4px 0 14px; font-size: 15px; font-weight: 500; opacity: .95; animation: ls-rise .7s .7s cubic-bezier(.22, 1, .36, 1) both; }
+.ls-back { animation: ls-rise .7s .85s cubic-bezier(.22, 1, .36, 1) both; text-shadow: none; box-shadow: 0 10px 30px rgb(201 61 102 / .45); }
+.ls-rain { position: absolute; inset: 0; pointer-events: none; }
+.ls-rain span { position: absolute; bottom: -60px; animation: ls-float linear infinite both; opacity: 0; }
+@keyframes ls-float {
+  0% { transform: translate(0, 0) rotate(0); opacity: 0; }
+  10% { opacity: .95; }
+  85% { opacity: .9; }
+  100% { transform: translate(var(--drift), -115vh) rotate(var(--spin)); opacity: 0; }
+}
+.notif-types { display: grid; gap: 6px; margin: 4px 0; }
+.check { display: flex !important; align-items: center; gap: 8px; font-size: 15px; }
+.check input { width: 18px !important; height: 18px; accent-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) {
+  .love-fab .lf-heart, .ls-heart, .ls-heart span, .ls-from, .ls-title, .ls-count, .ls-sub, .ls-back, .love-show { animation: none !important; }
+  .ls-rain { display: none; }
+}
+.check input { padding: 0; }

@@ -146,6 +146,7 @@ function writeNote() {
     e.preventDefault();
     const text = f.text.value.trim(); if (!text) return;
     S.put('note:' + S.uid(), { by: me(), text, at: Date.now() }, `feat(notes): a note from ${nameOf(me())} 💌`);
+    notify('notes', `💌 ${nameOf(me())} wrote you a note`, 'Open hangouts to read it');
     m.close(); toast('💌 Note sent');
   };
 }
@@ -197,7 +198,7 @@ function toast(msg, ms = 2600) {
   $('#toasts').append(el); setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, ms);
 }
 function openModal(html, cls = '') {
-  const d = $('#modal'); d.className = 'modal ' + cls; d.innerHTML = html; d.onclick = null;
+  const d = $('#modal'); d.className = 'modal ' + cls; d.innerHTML = html; d.onclick = null; d.onchange = null;
   if (!d.open) d.showModal();
   return d;
 }
@@ -1124,6 +1125,7 @@ $('#view').addEventListener('click', e => {
     'log-past': () => openDateForm({ status: 'done', date: today() }, true),
     propose: () => {
       S.put(key, { ...d, status: 'proposed', by: me() }, `feat(rsvp): ${nameOf(me())} asked "${d.title}" 💌`);
+      notify('ask', `💌 ${nameOf(me())} has a question for you`, 'Will you go on a date with me?');
       location.hash = '#ask';
     },
     ship: () => { S.put(key, { ...d, status: 'done' }, `feat(memories): "${d.title}" 💖`); burst(); toast('💖 Saved to memories'); openDateForm({ ...S.get(key), key }, true); },
@@ -1228,6 +1230,177 @@ function openShare(d) {
   };
 }
 
+// ---- notifications ------------------------------------------------------------------
+// Web Push with no server of our own: the sender's phone asks GitHub Actions (notify.yml) to deliver it,
+// passing the other person's push subscriptions, which live in the encrypted shared data as push:<person>:<device>.
+// The repo is public, so titles stay generic and never include the text of a note.
+const VAPID = 'BO1ihzt72rnPOfdwvC-E1JBNykAWJX6Qc02CZeLd3LQjgBOMP9nQjXpaCREPbda-GNoDZ8RZp2hnuXhP4q_3N6Y';
+const NOTIFY_TYPES = { love: '💖 I love yous', notes: '💌 Love notes', ask: '💍 Date questions' };
+const deviceId = () => { let id = S.ls.get('device', null); if (!id) { id = S.uid(); S.ls.set('device', id); } return id; };
+const pushKey = (p = me()) => `push:${p}:${deviceId()}`;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const pushOn = () => pushSupported() && Notification.permission === 'granted' && !!S.get(pushKey());
+const deviceName = () => (/iPhone|iPad/.test(navigator.userAgent) ? 'iPhone' : /Android/.test(navigator.userAgent) ? 'Android phone' : 'computer');
+async function subscribe() {
+  const reg = await navigator.serviceWorker.register('sw.js');
+  await navigator.serviceWorker.ready;
+  return (await reg.pushManager.getSubscription())
+    || reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: Uint8Array.from(atob(VAPID.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)) });
+}
+async function enablePush() {
+  if (!S.isSynced()) throw new Error('Connect your phones first (above). Notifications travel through the same sync.');
+  if (!pushSupported()) throw new Error(isIOS() && !isInstalled() ? 'On iPhone, add hangouts to your home screen first, then open it from there and turn this on.' : 'This browser can’t show notifications.');
+  if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications are blocked. Allow them for this site in your phone’s settings, then try again.');
+  const sub = await subscribe();
+  S.put(pushKey(), { sub: sub.toJSON(), prefs: S.get(pushKey())?.prefs || { love: true, notes: true, ask: true }, device: deviceName(), at: Date.now() }, `feat(notify): ${nameOf(me())} turned on notifications 🔔`);
+}
+async function disablePush() {
+  try { await (await navigator.serviceWorker.getRegistration())?.pushManager.getSubscription().then(s => s?.unsubscribe()); } catch {}
+  if (S.get(pushKey())) S.remove(pushKey(), `chore(notify): ${nameOf(me())} turned off notifications 🔕`);
+}
+/** Keep this phone's subscription current: browsers rotate them, and "Not you?" moves the phone to the other person. */
+async function pushCheck() {
+  if (!pushSupported() || Notification.permission !== 'granted') return;
+  const old = S.get(pushKey(other(me()))), rec = S.get(pushKey()) || old;
+  if (old) S.remove(pushKey(other(me())), null);
+  if (!rec) return;
+  try {
+    const sub = await subscribe();
+    if (sub.endpoint !== S.get(pushKey())?.sub?.endpoint) S.put(pushKey(), { ...rec, sub: sub.toJSON(), at: Date.now() }, 'chore(notify): refresh this phone 🔔');
+  } catch (e) { console.warn('push check failed', e); }
+}
+/** Notify `to` (the other person by default) on every phone where they allow this type. Fire and forget. */
+async function notify(type, title, body, url = '#ask', to = other(me())) {
+  const subs = S.all(`push:${to}:`).filter(r => r.sub && r.prefs?.[type] !== false).map(r => r.sub);
+  if (!subs.length) return false;
+  try { return await S.dispatch('notify', { subs, title, body, url, tag: type }); } catch (e) { console.warn('notify failed', e); return false; }
+}
+navigator.serviceWorker?.addEventListener('message', e => {
+  if (e.data?.type === 'push') S.sync();
+  if (e.data?.type === 'open') { location.hash = e.data.hash; S.sync(); }
+});
+function notifyBlock() {
+  const them = nameOf(other(me())), theirs = S.all(`push:${other(me())}:`).length;
+  const partner = `<p class="small muted">${theirs ? `🔔 ${esc(them)} has notifications on` : `🔕 ${esc(them)} hasn’t turned notifications on yet, so they’ll only see things when they open the app.`}</p>`;
+  if (!S.isSynced()) return '<p class="small muted">Connect your phones first. Notifications travel through the same sync.</p>';
+  if (!pushSupported() && !(isIOS() && !isInstalled())) return '<p class="small muted">This browser can’t show notifications.</p>';
+  const on = pushOn(), prefs = S.get(pushKey())?.prefs || {};
+  return `
+    <p class="small muted">${on ? '✅ On for this phone.' : `Get a buzz when ${esc(them)} sends you love, a note, or asks you out.`}${isIOS() && !isInstalled() ? ' On iPhone this only works from the home-screen app.' : ''}</p>
+    ${on ? `<div class="notif-types">${Object.entries(NOTIFY_TYPES).map(([k, l]) => `<label class="check"><input type="checkbox" data-notif="${k}" ${prefs[k] !== false ? 'checked' : ''}> ${l}</label>`).join('')}</div>` : ''}
+    <div class="actions left">${on ? '<button type="button" class="btn ghost small" data-s="notif-test">Send me a test</button><button type="button" class="btn ghost small danger" data-s="notif-off">Turn off</button>'
+      : '<button type="button" class="btn primary small" data-s="notif-on">🔔 Turn on notifications</button>'}</div>
+    ${partner}`;
+}
+
+// ---- I love you -----------------------------------------------------------------------
+// Each tap animates straight away. Taps are batched: 1.8s after the last one (or when the app is hidden),
+// one love:<id> {by, n} record is saved and one notification goes out, "I love you ×n".
+const LOVE_HEARTS = ['💖', '💗', '💕', '❤️', '💘', '💞', '🩷', '💓'];
+const LOVE_COMBO = { 5: 'aww', 10: 'so much ❤️', 20: 'on fire 🔥', 30: 'obsessed', 50: 'unstoppable 🚀', 75: 'down bad 🥹', 100: 'legendary 👑', 200: 'forever and ever ♾️' };
+let loveN = 0, loveTimer = null;
+const loveTotal = p => S.all('love:').filter(l => l.by === p).reduce((s, l) => s + (l.n || 0), 0);
+const rand = (a, b) => a + Math.random() * (b - a);
+function floatUp(text, x, y, cls, opts = {}) {
+  const el = document.createElement('span'); el.className = cls; el.textContent = text;
+  el.style.left = x + 'px'; el.style.top = y + 'px';
+  $('#loveFx').append(el);
+  const dx = opts.dx ?? rand(-70, 70), up = opts.up ?? rand(160, 260), rot = rand(-35, 35), s = opts.scale ?? rand(.9, 1.5);
+  const a = el.animate([
+    { transform: 'translate(-50%, -50%) scale(.2) rotate(0deg)', opacity: 0 },
+    { transform: `translate(calc(-50% + ${dx * .35}px), calc(-50% - ${up * .3}px)) scale(${s * 1.15}) rotate(${rot * .5}deg)`, opacity: 1, offset: .25 },
+    { transform: `translate(calc(-50% + ${dx}px), calc(-50% - ${up}px)) scale(${s * .8}) rotate(${rot}deg)`, opacity: 0 },
+  ], { duration: opts.duration ?? rand(1000, 1500), easing: 'cubic-bezier(.2, .7, .3, 1)' });
+  a.onfinish = () => el.remove();
+}
+function loveTap(e) {
+  const fab = $('#loveFab'), r = fab.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  loveN++;
+  clearTimeout(loveTimer); loveTimer = setTimeout(loveSend, 1800);
+  fab.classList.add('busy'); fab.style.setProperty('--heat', Math.min(loveN / 40, 1));
+  const c = $('#loveCount'); c.hidden = false; c.textContent = `×${loveN}`;
+  navigator.vibrate?.(loveN % 10 ? 8 : [12, 40, 24]);
+  if (reduceMotion) return;
+  fab.animate([{ transform: 'scale(1)' }, { transform: 'scale(.84)' }, { transform: 'scale(1.14)' }, { transform: 'scale(1)' }], { duration: 420, easing: 'cubic-bezier(.34, 1.56, .64, 1)' });
+  c.animate([{ transform: 'scale(1.6) rotate(-8deg)' }, { transform: 'scale(1) rotate(0)' }], { duration: 320, easing: 'cubic-bezier(.34, 1.56, .64, 1)' });
+  const ring = document.createElement('span'); ring.className = 'love-ring'; ring.style.left = cx + 'px'; ring.style.top = cy + 'px';
+  $('#loveFx').append(ring); ring.animate([{ transform: 'translate(-50%, -50%) scale(.6)', opacity: .7 }, { transform: 'translate(-50%, -50%) scale(2.8)', opacity: 0 }], { duration: 650, easing: 'ease-out' }).onfinish = () => ring.remove();
+  const burst = 1 + Math.min(Math.floor(loveN / 8), 4); // more hearts per tap as the streak grows
+  for (let i = 0; i < burst; i++) setTimeout(() => floatUp(LOVE_HEARTS[Math.floor(Math.random() * LOVE_HEARTS.length)], cx + rand(-10, 10), cy - 10, 'love-float'), i * 60);
+  if (LOVE_COMBO[loveN]) floatUp(LOVE_COMBO[loveN], cx, cy - 40, 'love-combo', { dx: 0, up: 120, scale: 1, duration: 1600 });
+  if (loveN % 10 === 0 && window.confetti) {
+    const shapes = confetti.shapeFromText ? LOVE_HEARTS.slice(0, 3).map(t => confetti.shapeFromText({ text: t, scalar: 2 })) : undefined;
+    confetti({ particleCount: 24 + Math.min(loveN, 60), spread: 70, startVelocity: 32, scalar: 1.6, ticks: 140, shapes, angle: 75, origin: { x: cx / innerWidth, y: cy / innerHeight } });
+  }
+}
+function loveSend() {
+  clearTimeout(loveTimer); loveTimer = null;
+  const n = loveN; if (!n) return;
+  loveN = 0;
+  const fab = $('#loveFab'), c = $('#loveCount');
+  S.put('love:' + S.uid(), { by: me(), n, at: Date.now() }, `feat(love): ${nameOf(me())} said I love you ×${n} 💖`);
+  notify('love', `💖 ${nameOf(me())} loves you`, n === 1 ? 'I love you!' : `I love you ×${n.toLocaleString()}`);
+  toast(`💌 Sent to ${nameOf(other(me()))}: I love you${n > 1 ? ` ×${n}` : ''} · ${loveTotal(me()).toLocaleString()} all time`);
+  fab.classList.remove('busy'); fab.style.setProperty('--heat', 0);
+  if (reduceMotion) { c.hidden = true; return; }
+  c.animate([{ transform: 'translate(0, 0) scale(1)', opacity: 1 }, { transform: 'translate(0, -16px) scale(1.3)', opacity: 1, offset: .3 }, { transform: 'translate(40px, -60vh) scale(.6)', opacity: 0 }],
+    { duration: 900, easing: 'cubic-bezier(.5, 0, .75, 0)' }).onfinish = () => { if (!loveN) c.hidden = true; };
+}
+addEventListener('pagehide', loveSend);
+document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && loveSend());
+
+// Received love: a full-screen show. Seen keys are remembered per phone, so clock differences between phones don't matter.
+const loveSeen = () => new Set(S.ls.get('loveSeen', []));
+function loveAlert() {
+  const loves = S.all('love:'), seen = loveSeen();
+  let since = S.ls.get('loveSince', 0);
+  if (!since) S.ls.set('loveSince', since = Date.now() - 6 * 36e5); // a new phone shouldn't replay old history on its first sync
+  const fresh = loves.filter(l => l.by !== me() && !seen.has(l.key) && l.at > since);
+  if (!fresh.length || $('#lock').hidden === false) return;
+  S.ls.set('loveSeen', loves.map(l => l.key)); // only keys that still exist, so the list never grows past the records
+  showLove(fresh[0].by, fresh.reduce((s, l) => s + (l.n || 0), 0), fresh.length > 1);
+}
+function showLove(by, n, away) {
+  document.querySelector('.love-show')?.remove();
+  const el = document.createElement('div');
+  el.className = 'love-show'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', `${nameOf(by)} loves you, ${n} times`);
+  el.innerHTML = `
+    <div class="ls-rain" aria-hidden="true"></div>
+    <div class="ls-card">
+      <div class="ls-heart" aria-hidden="true"><span>💖</span></div>
+      <p class="ls-from">${esc(nameOf(by))}</p>
+      <h2 class="ls-title">loves you</h2>
+      <div class="ls-count">×<b>${reduceMotion ? n.toLocaleString() : 0}</b></div>
+      <p class="ls-sub">${away ? 'while you were away · ' : ''}${loveTotal(by).toLocaleString()} I love yous all time</p>
+      <button class="btn primary ls-back">💖 Say it back</button>
+    </div>`;
+  document.body.append(el);
+  const close = () => { if (!el.isConnected) return; clearTimeout(auto); el.classList.add('out'); setTimeout(() => el.remove(), reduceMotion ? 0 : 450); };
+  const auto = setTimeout(close, 9000);
+  el.addEventListener('click', e => { if (e.target.closest('.ls-back')) { close(); loveTap(); } else close(); });
+  addEventListener('keydown', function esc_(e) { if (e.key === 'Escape') { close(); removeEventListener('keydown', esc_); } });
+  navigator.vibrate?.([60, 80, 60, 80, 200]);
+  if (reduceMotion) return;
+  // count up with an ease-out, so big numbers rush then settle
+  const b = $('.ls-count b', el), t0 = performance.now(), dur = Math.min(600 + n * 25, 2200);
+  const step = t => { const k = Math.min((t - t0) / dur, 1), v = Math.round(n * (1 - Math.pow(1 - k, 3))); b.textContent = v.toLocaleString(); if (k < 1) requestAnimationFrame(step); else $('.ls-count', el).classList.add('done'); };
+  setTimeout(() => requestAnimationFrame(step), 450);
+  // heart rain, denser for bigger numbers
+  const rain = $('.ls-rain', el);
+  for (let i = 0, count = Math.min(14 + n, 60); i < count; i++) {
+    const h = document.createElement('span');
+    h.textContent = LOVE_HEARTS[i % LOVE_HEARTS.length];
+    h.style.cssText = `left:${rand(0, 100)}%;font-size:${rand(18, 46)}px;--drift:${rand(-60, 60)}px;--spin:${rand(-40, 40)}deg;animation-duration:${rand(3.2, 6)}s;animation-delay:${rand(0, 2.5)}s`;
+    rain.append(h);
+  }
+  setTimeout(() => {
+    if (!window.confetti || !el.isConnected) return;
+    const shapes = confetti.shapeFromText ? LOVE_HEARTS.slice(0, 4).map(t => confetti.shapeFromText({ text: t, scalar: 2.2 })) : undefined;
+    confetti({ particleCount: 90, spread: 110, startVelocity: 45, scalar: 2, ticks: 260, shapes, origin: { x: .5, y: .45 }, zIndex: 300 });
+  }, 650);
+}
+$('#loveFab').addEventListener('click', loveTap);
+
 // ---- settings / identity --------------------------------------------------------
 function pickMe() {
   const P = people();
@@ -1277,6 +1450,7 @@ async function openSettings() {
         <p class="small">This phone belongs to <b>${esc(nameOf(me()))}</b>. <button type="button" class="linkish" data-s="me">Change</button></p>
       </fieldset>
       <fieldset><legend>Share between phones</legend>${syncBlock}<p class="err" id="sErr" role="alert"></p></fieldset>
+      <fieldset><legend>Notifications</legend><div id="notifBlock">${notifyBlock()}</div><p class="err" id="nErr" role="alert"></p></fieldset>
       ${isInstalled() ? '' : `<fieldset><legend>App</legend>
         <p class="small muted">Put hangouts on your home screen so it opens like a normal app.</p>
         <div class="actions left"><button type="button" class="btn small primary" data-s="install">📲 Add to home screen</button></div>
@@ -1294,6 +1468,10 @@ async function openSettings() {
     m.close(); toast('Saved');
     if (!S.ls.get('me', null)) pickMe();
   });
+  m.onchange = e => { // onchange, not addEventListener: the dialog is reused, listeners would pile up
+    const k = e.target.dataset?.notif, rec = k && S.get(pushKey()); if (!rec) return;
+    S.put(pushKey(), { ...rec, prefs: { ...rec.prefs, [k]: e.target.checked } }, null);
+  };
   $('#sImport', m)?.addEventListener('change', async e => {
     try { S.importItems(JSON.parse(await e.target.files[0].text())); toast('Backup restored'); m.close(); } catch { err('That file isn’t a hangouts backup.'); }
   });
@@ -1302,6 +1480,10 @@ async function openSettings() {
     const btn = e.target.closest('button');
     const busy = async fn => { btn.disabled = true; const t = btn.textContent; btn.textContent = 'One moment…'; err(''); try { await fn(); } catch (x) { err(x.message); } finally { btn.disabled = false; btn.textContent = t; } };
     if (a === 'me') { m.close(); pickMe(); }
+    const nbusy = async fn => { btn.disabled = true; $('#nErr', m).textContent = ''; try { await fn(); } catch (x) { $('#nErr', m).textContent = x.message; } finally { btn.disabled = false; $('#notifBlock', m).innerHTML = notifyBlock(); } };
+    if (a === 'notif-on') nbusy(async () => { await enablePush(); toast('🔔 Notifications on'); });
+    if (a === 'notif-off') nbusy(async () => { await disablePush(); toast('🔕 Notifications off on this phone'); });
+    if (a === 'notif-test') nbusy(async () => { if (!(await notify('love', '🔔 hangouts', 'Notifications work! 💖', '#ask', me()))) throw new Error('Couldn’t send the test. Check the sync pill says Synced.'); toast('Sent. It arrives in about 20 seconds.'); });
     if (a === 'install') { m.close(); install(); }
     if (a === 'sync') busy(async () => { await S.sync(); m.close(); toast(S.status.state === 'ok' ? '✓ Synced' : 'Couldn’t sync: ' + S.status.error); });
     if (a === 'retoken') busy(async () => {
@@ -1372,7 +1554,7 @@ function noteAlert() {
   if (tab === 'ask' && n.length) S.ls.set('notesSeen', n[0].at); // seen once the front page shows it
 }
 S.onChange(what => {
-  if (what === 'items') { render(); noteAlert(); return; }
+  if (what === 'items') { render(); noteAlert(); loveAlert(); return; }
   renderSync();
   if (S.status.state === 'ok') $$('.thumb.missing img[data-photo]').forEach(img => { img.closest('.thumb').classList.remove('missing'); hydratePhotos(img.closest('.thumb')); });
 });
@@ -1387,6 +1569,7 @@ await gate();
 route();
 if (!S.ls.get('onboarded', false)) { S.ls.set('onboarded', true); if (!S.ls.get('me', null)) pickMe(); }
 else if (!S.ls.get('me', null) && S.get('cfg:people')) pickMe();
-S.sync();
+S.sync().then(pushCheck);
 noteAlert();
+loveAlert();
 loadWeather();

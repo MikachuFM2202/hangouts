@@ -1,0 +1,19 @@
+# Delivers push notifications for the site (I love you, notes, date questions).
+# The sender's phone sends a repository_dispatch with the other person's push subscriptions.
+name: notify
+on:
+  repository_dispatch: { types: [notify] }
+permissions: { contents: read }
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with: { sparse-checkout: scripts }
+      - run: npm i --no-save --no-audit --no-fund --prefix scripts web-push@3.6.7
+      - run: node scripts/notify.mjs
+        env:
+          PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+          VAPID_PUBLIC: BO1ihzt72rnPOfdwvC-E1JBNykAWJX6Qc02CZeLd3LQjgBOMP9nQjXpaCREPbda-GNoDZ8RZp2hnuXhP4q_3N6Y
+          VAPID_PRIVATE: ${{ secrets.VAPID_PRIVATE_KEY }}
