@@ -430,17 +430,18 @@ function viewCalendar() {
   const P = people(), m = me(), y = calCursor.getFullYear(), mo = calCursor.getMonth(), t = today();
   const offset = (new Date(y, mo, 1).getDay() + 6) % 7, n = new Date(y, mo + 1, 0).getDate();
   const byDay = {};
-  dates().filter(d => d.date && d.status !== 'idea').forEach(d => (byDay[d.date] ||= []).push(d));
+  dates().filter(d => d.date && d.status !== 'done').forEach(d => (byDay[d.date] ||= []).push(d)); // saved events are dated ideas: show them too
+  const evs = eventsByDay();
   const matches = [];
   let cells = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow">${d}</div>`).join('');
   cells += '<div class="day pad"></div>'.repeat(offset);
   for (let d = 1; d <= n; d++) {
-    const ds = `${y}-${pad(mo + 1)}-${pad(d)}`, fa = isFree('a', ds), fb = isFree('b', ds), past = ds < t, ev = byDay[ds];
+    const ds = `${y}-${pad(mo + 1)}-${pad(d)}`, fa = isFree('a', ds), fb = isFree('b', ds), past = ds < t, ev = byDay[ds], kl = evs[ds]?.length;
     if (!past && fa && fb) matches.push(ds);
-    const label = `${fmtDay(ds, LONG)}${fa ? `, ${P.a} free` : ''}${fb ? `, ${P.b} free` : ''}${ev ? `, ${ev.map(e => e.title).join(', ')}` : ''}`;
+    const label = `${fmtDay(ds, LONG)}${fa ? `, ${P.a} free` : ''}${fb ? `, ${P.b} free` : ''}${ev ? `, ${ev.map(e => e.title).join(', ')}` : ''}${kl ? `, ${plural(kl, 'event')} in KL` : ''}`;
     cells += `<button class="day${fa ? ' fa' : ''}${fb ? ' fb' : ''}${fa && fb ? ' match' : ''}${past ? ' past' : ''}${ds === t ? ' today' : ''}" data-day="${ds}"
       ${past ? 'disabled' : ''} aria-pressed="${isFree(m, ds)}" aria-label="${esc(label)}">
-      <span class="num">${d}</span>${ev ? `<span class="ev" title="${esc(ev.map(e => e.title).join(', '))}">${esc(ev[0].emoji || '📌')}</span>` : ''}
+      <span class="num">${d}</span>${ev ? `<span class="ev" title="${esc(ev.map(e => e.title).join(', '))}">${esc(ev[0].emoji || '📌')}</span>` : ''}${kl ? `<span class="evn" aria-hidden="true"><i>🎟️</i>${kl}</span><span class="evl" aria-hidden="true">${evs[ds].slice(0, 2).map(e => `<span>${esc(e.emoji)} ${esc(e.name)}</span>`).join('')}${kl > 2 ? `<span class="more">+${kl - 2} more</span>` : ''}</span>` : ''}
       <span class="marks"><i class="ma"></i><i class="mb"></i></span></button>`;
   }
   return `
@@ -458,23 +459,45 @@ function viewCalendar() {
       </div>
       <div class="cal-grid">${cells}</div>
       <div class="legend">
-        <span><i class="sw a"></i>${esc(P.a)}</span><span><i class="sw b"></i>${esc(P.b)}</span><span><i class="sw m"></i>Both free</span><span>📌 Date planned</span>
+        <span><i class="sw a"></i>${esc(P.a)}</span><span><i class="sw b"></i>${esc(P.b)}</span><span><i class="sw m"></i>Both free</span><span>📌 Plan</span><span><span class="evn">🎟️</span> Events in KL</span>
       </div>
     </div>
     <div class="panel">
       <h3>${matches.length ? `💞 You’re both free on ${plural(matches.length, 'day')} this month` : 'No days in common yet'}</h3>
       ${matches.length ? `<ul class="matches">${matches.map(ds => `
         <li><span>${fmtDay(ds, LONG)}</span>
-        ${byDay[ds] ? `<span class="muted small">${esc(byDay[ds][0].emoji || '')} ${esc(byDay[ds][0].title)}</span>` : `<button class="btn small" data-act="plan-on" data-day="${ds}">Plan a date</button>`}</li>`).join('')}</ul>`
+        <span class="m-acts">${evs[ds] ? `<button class="btn small ghost" data-act="wo-open" data-day="${ds}">🎟️ ${plural(evs[ds].length, 'event')}</button>` : ''}
+        ${byDay[ds] ? `<span class="muted small">${esc(byDay[ds][0].emoji || '')} ${esc(byDay[ds][0].title)}</span>` : `<button class="btn small" data-act="plan-on" data-day="${ds}">Plan a date</button>`}</span></li>`).join('')}</ul>`
       : `<p class="muted">Both of you tap the days you’re free. Days that match turn purple and show up here.</p>`}
       <div class="quick">
         <button class="btn ghost small" data-act="weekends">I’m free every weekend</button>
         <button class="btn ghost small" data-act="clear-month">Clear my days this month</button>
       </div>
     </div>
+    ${whatsOn(evs)}
   </section>`;
 }
+function whatsOn(evs) {
+  const days = Object.entries(evs), saved = savedTitles();
+  if (!week) return '';
+  return `
+    <div class="panel whats-on">
+      <h3>🎟️ What’s on in KL this week</h3>
+      ${days.length ? days.map(([ds, list]) => `
+      <details class="wo-day" id="wo-${ds}" data-day="${ds}" ${woOpen.has(ds) ? 'open' : ''}>
+        <summary><span>${ds === today() ? 'Today' : fmtDay(ds, LONG)}</span><span class="muted small">${plural(list.length, 'event')}${isFree('a', ds) && isFree('b', ds) ? ' · 💞 you’re both free' : ''}</span></summary>
+        <ul class="wo-list">${list.map(e => `
+          <li><span class="wo-time">${evWhen(e, ds)}</span>
+            <span class="wo-name"><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.emoji)} ${esc(e.name)}</a><span class="muted small">${esc(e.venue || e.area)} · ~${e.km} km</span></span>
+            <button class="btn small ghost ${saved.has(evTitle(e).toLowerCase()) ? 'saved' : ''}" data-act="save-ev" data-id="${esc(e.id)}">${saved.has(evTitle(e).toLowerCase()) ? '✓' : '+ Add'}</button></li>`).join('')}</ul>
+      </details>`).join('') : '<p class="muted">No events found for the coming days.</p>'}
+      <a class="linkish small" href="#week">Search and filter them on This week →</a>
+    </div>`;
+}
+let woOpen = new Set(); // which What's on days are expanded, kept across re-renders
 function bindCalendar(v) {
+  if (Date.now() - weekAt > 30 * 6e4) loadWeek();
+  $$('.wo-day', v).forEach(el => el.addEventListener('toggle', () => { el.open ? woOpen.add(el.dataset.day) : woOpen.delete(el.dataset.day); }));
   const grid = $('.cal-grid', v);
   let mode = false, touched = new Set(), mouse = false;
   const cls = me() === 'a' ? 'fa' : 'fb';
@@ -757,7 +780,7 @@ async function loadWeek() {
     if (!r.ok) throw new Error(r.status);
     week = await r.json(); weekErr = '';
   } catch { weekErr = navigator.onLine ? 'Couldn’t load this week’s events.' : 'You’re offline.'; }
-  if (tab === 'week') render();
+  if (tab === 'week' || tab === 'calendar') render();
 }
 async function findWeek() {
   if (weekBusy) return;
@@ -776,13 +799,22 @@ async function findWeek() {
     toast(e.status === 403 || e.status === 404 ? 'Your GitHub token can’t start the search. It needs Contents: Read and write.' : 'Couldn’t start the search. Try again?', 5000);
   } finally { weekBusy = false; render(); }
 }
+/** This week's events by day, from today on. One that runs several days shows on each of them. */
+function eventsByDay() {
+  const t = today(), out = {};
+  for (const e of week?.events || []) {
+    const last = e.end_date > e.date ? e.end_date : e.date;
+    for (let ds = e.date < t ? t : e.date; ds <= last && ds < week.to; ds = isoDay(new Date(parseDay(ds).getTime() + 864e5 + 36e5))) (out[ds] ||= []).push(e);
+  }
+  Object.values(out).forEach(l => l.sort((a, b) => (a.time || '').localeCompare(b.time || '')));
+  return Object.fromEntries(Object.entries(out).sort(([a], [b]) => a.localeCompare(b)));
+}
+const evWhen = (e, ds) => (e.date < ds ? `On till ${e.end_date === ds ? 'today' : fmtDay(e.end_date)}` : e.time ? fmtTime(e.time) : 'All day');
 const isDaytime = e => e.time && e.time >= '07:00' && e.time < '18:00';
 const isWeekend = ds => [0, 6].includes(parseDay(ds).getDay());
 function viewWeek() {
   const t = today(), saved = savedTitles();
-  const list = (week?.events || []).filter(e => (e.end_date || e.date) >= t); // the file is made at 6am; drop what's already over
-  const days = {};
-  list.forEach(e => (days[e.date < t ? t : e.date] ||= []).push(e)); // multi-day events that started earlier sit under today
+  const days = eventsByDay();
   const findBtn = `<button class="btn primary" data-act="week-find" ${weekBusy ? 'disabled' : ''}>${weekBusy ? '🔎 Searching…' : '🔎 Find new events'}</button>`;
   return `
   <section class="week">
@@ -795,14 +827,14 @@ function viewWeek() {
       <input class="search" type="search" id="weekSearch" placeholder="Search events… (music, yoga, Bangsar)" value="${esc(weekQuery)}" aria-label="Search events">
       <div class="chips"><button class="chip" data-act="week-day" aria-pressed="${weekDaytime}">☀️ Daytime</button><button class="chip" data-act="week-end" aria-pressed="${weekEnd}">🗓️ Weekend</button></div>
     </div>
-    ${Object.entries(days).sort(([a], [b]) => a.localeCompare(b)).map(([ds, evs]) => `
+    ${Object.entries(days).map(([ds, evs]) => `
     <div class="ev-day" data-day="${ds}">
       <h2 class="col-title">${ds === t ? 'Today' : fmtDay(ds, LONG)}</h2>
       ${wxLine(ds)}
       <div class="act-grid">${evs.map(e => `
         <article class="act wk-ev" data-daytime="${isDaytime(e) ? 1 : 0}" data-text="${esc([e.name, e.venue, e.area, e.cat, e.summary].join(' ').toLowerCase())}">
           <div class="a-top"><span class="c-emoji">${esc(e.emoji)}</span><div><h3>${esc(e.name)}</h3>
-            <div class="muted small">${e.time ? fmtTime(e.time) : 'All day'}${e.end_date > e.date ? ` · until ${fmtDay(e.end_date)}` : ''} · ~${e.km} km away</div></div></div>
+            <div class="muted small">${evWhen(e, ds)}${e.end_date > e.date && e.date === ds ? ` · until ${fmtDay(e.end_date)}` : ''} · ~${e.km} km away</div></div></div>
           ${e.summary ? `<p>${esc(e.summary)}</p>` : ''}
           ${e.venue || e.area ? `<div class="i-where">${mapLink([e.venue, e.area].filter(Boolean).join(', '))}</div>` : ''}
           ${e.cat ? `<div class="i-tags"><span class="pill">${esc(e.cat)}</span></div>` : ''}
@@ -812,7 +844,7 @@ function viewWeek() {
           </div>
         </article>`).join('')}</div>
     </div>`).join('')}
-    <p class="empty" id="noEvents" hidden>${list.length ? 'Nothing matches. Try another word or turn off a filter.' : 'No events found for this week yet. Tap Find new events.'}</p>`}
+    <p class="empty" id="noEvents" hidden>${Object.keys(days).length ? 'Nothing matches. Try another word or turn off a filter.' : 'No events found for this week yet. Tap Find new events.'}</p>`}
   </section>`;
 }
 function bindWeek(v) {
@@ -1044,6 +1076,7 @@ $('#view').addEventListener('click', e => {
     'save-act': () => { const a = ACTIVITY_GROUPS[btn.dataset.g].items[btn.dataset.i]; saveIdea({ emoji: a.e, title: a.name, notes: a.what, link: a.url }); render(); },
     'act-free': () => { actFree = !actFree; render(); },
     'week-find': findWeek,
+    'wo-open': () => { const el = $('#wo-' + btn.dataset.day); if (el) { el.open = true; el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' }); } },
     'week-day': () => { weekDaytime = !weekDaytime; render(); },
     'week-end': () => { weekEnd = !weekEnd; render(); },
     'save-ev': () => { const e = week?.events.find(x => x.id === btn.dataset.id); if (e) saveIdea({ emoji: e.emoji, title: evTitle(e), notes: e.summary || undefined, link: e.url, place: e.venue || e.area || undefined, date: e.date, time: e.time || undefined }); render(); },
