@@ -553,3 +553,23 @@ html.noscroll .ib-icon img { width: 34px; height: 34px; }
   .ls-rain { display: none; }
 }
 .check input { padding: 0; }
+
+/* ---------- in-app camera ---------- */
+.modal.camera { padding: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; border-radius: 0; background: #000; color: #fff; overflow: hidden; }
+.modal.camera::backdrop { background: #000; }
+.cam { position: relative; width: 100%; height: 100%; }
+.cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+.cam video.mirror { transform: scaleX(-1); }
+.cam-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+.cam-flash.go { animation: cam-flash .35s ease-out; }
+@keyframes cam-flash { from { opacity: .85; } }
+.cam-msg { position: absolute; left: 20px; right: 20px; top: 40%; translate: 0 -50%; margin: 0; padding: 16px 18px; border-radius: 16px; background: rgb(0 0 0 / .7); text-align: center; font-size: 15px; line-height: 1.45; }
+.cam-bar { position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 28px calc(24px + env(safe-area-inset-bottom, 0px)); display: flex; justify-content: space-between; align-items: center;
+  background: linear-gradient(transparent, rgb(0 0 0 / .55)); }
+.cam-btn { width: 52px; height: 52px; border-radius: 50%; border: 0; background: rgb(255 255 255 / .18); color: #fff; font-size: 24px; cursor: pointer; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.cam-shutter { width: 76px; height: 76px; border-radius: 50%; border: 5px solid #fff; background: var(--accent); cursor: pointer; box-shadow: 0 0 0 4px rgb(0 0 0 / .25); transition: transform .12s; touch-action: manipulation; }
+.cam-shutter:active:not(:disabled) { transform: scale(.88); }
+.cam-shutter:disabled { opacity: .4; }
+.cam-shots { position: absolute; left: 0; right: 0; bottom: calc(124px + env(safe-area-inset-bottom, 0px)); display: flex; gap: 6px; padding: 0 16px; overflow-x: auto; scrollbar-width: none; }
+.cam-shots img { width: 54px; height: 54px; object-fit: cover; border-radius: 10px; border: 2px solid #fff; flex: none; animation: pop .3s cubic-bezier(.34, 1.56, .64, 1); }
+.cam-done { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); right: 14px; }

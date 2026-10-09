@@ -967,12 +967,22 @@ function hydratePhotos(root) {
 }
 let photoTarget = null;
 function capture(key) { photoTarget = key; $('#photoInput').click(); }
-async function shrink(file, max = 1600) {
-  const bmp = await createImageBitmap(file);
-  const s = Math.min(1, max / Math.max(bmp.width, bmp.height));
-  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
-  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); bmp.close?.();
+/** Decode an image file. createImageBitmap fails on some phone formats that an <img> can still read. */
+async function decode(file) {
+  try { return await createImageBitmap(file); } catch {}
+  const url = URL.createObjectURL(file), img = new Image();
+  try { img.src = url; await img.decode(); return img; } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+}
+/** Draw any image source (photo, bitmap, live video frame) into a JPEG at most `max` px on the long side. */
+function toJpeg(src, w, h, max = 1600) {
+  const s = Math.min(1, max / Math.max(w, h));
+  const c = document.createElement('canvas'); c.width = Math.round(w * s); c.height = Math.round(h * s);
+  c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
   return new Promise((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('encode failed'))), 'image/jpeg', 0.82));
+}
+async function shrink(file) {
+  const img = await decode(file);
+  try { return await toJpeg(img, img.naturalWidth || img.width, img.naturalHeight || img.height); } finally { img.close?.(); }
 }
 function todaysDateKey() {
   const t = today(), d = dates().find(x => x.date === t && x.status !== 'idea');
@@ -987,9 +997,20 @@ async function onPhotos(e) {
   if (!files.length) return;
   const target = photoTarget; photoTarget = null;
   toast(`📸 Saving ${plural(files.length, 'photo')}…`);
-  const ids = [];
+  const blobs = [];
   for (const f of files) {
-    try { ids.push(await S.addPhoto(await shrink(f))); } catch (err) { console.error(err); toast(`Couldn’t open ${f.name}`); }
+    try { blobs.push(await shrink(f)); }
+    catch (err) {
+      console.error(err);
+      toast(/hei[cf]/i.test(f.type + f.name) ? `Couldn’t open ${f.name}: this browser can’t read HEIC photos. Use the 📸 button, or set your camera to save JPEG.` : `Couldn’t open ${f.name}`, 6000);
+    }
+  }
+  await attachPhotos(blobs, target);
+}
+async function attachPhotos(blobs, target) {
+  const ids = [];
+  for (const b of blobs) {
+    try { ids.push(await S.addPhoto(b)); } catch (err) { console.error(err); toast('Couldn’t save a photo on this phone. Is storage full?', 5000); }
   }
   if (!ids.length) return;
   const key = (target && S.get(target)) ? target : todaysDateKey(); // only create a hangout once a photo actually worked
@@ -1001,8 +1022,73 @@ async function onPhotos(e) {
 }
 $('#photoInput').addEventListener('change', onPhotos);
 $('#cameraInput').addEventListener('change', onPhotos);
-$('#captureFab').addEventListener('click', () => { photoTarget = null; }); // the label itself opens #cameraInput
-$('#captureFab').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); photoTarget = null; $('#cameraInput').click(); } });
+
+// ---- in-app camera ----------------------------------------------------------------
+// 📸 opens a camera inside the page instead of handing off to the phone's camera app. The handoff failed on
+// Fofo's Galaxy S23: Samsung cameras can return HEIC (Chrome on Android can't read it), and a blocked camera
+// permission fails silently. Shots here are always JPEG, and a blocked camera says so. No camera API: the label's
+// native file input still works.
+const hasCamera = () => !!navigator.mediaDevices?.getUserMedia;
+async function openCamera() {
+  let facing = 'environment', stream = null, busy = false;
+  const shots = [];
+  const m = openModal(`
+    <div class="cam">
+      <video id="camVideo" playsinline autoplay muted></video>
+      <div class="cam-flash" id="camFlash"></div>
+      <p class="cam-msg" id="camMsg" hidden></p>
+      <div class="cam-shots" id="camShots" aria-live="polite"></div>
+      <div class="cam-bar">
+        <button class="cam-btn" data-cam="gallery" aria-label="Pick from gallery">🖼️</button>
+        <button class="cam-shutter" data-cam="shoot" aria-label="Take photo" disabled></button>
+        <button class="cam-btn" data-cam="flip" aria-label="Switch camera">🔄</button>
+      </div>
+      <button class="cam-done btn primary" data-cam="done">Done</button>
+    </div>`, 'camera');
+  const video = $('#camVideo', m), msg = $('#camMsg', m), shutter = $('[data-cam="shoot"]', m);
+  const stop = () => { stream?.getTracks().forEach(t => t.stop()); stream = null; };
+  const say = t => { msg.hidden = !t; msg.textContent = t || ''; };
+  const start = async () => {
+    stop(); shutter.disabled = true;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false });
+      if (!m.open) return stop(); // closed while the permission prompt was up
+      video.srcObject = stream; await video.play().catch(() => {});
+      video.classList.toggle('mirror', facing === 'user');
+      shutter.disabled = false; say('');
+    } catch (e) {
+      console.error('camera', e);
+      say(e.name === 'NotAllowedError' ? (isInstalled() ? 'The camera is blocked. Long-press the hangouts icon → App info → Permissions → Camera → Allow, then try again. Or pick photos with 🖼️.'
+        : 'The camera is blocked. Tap the 🔒 or ⓘ next to the address, set Camera to Allow, and if Android asks, let Chrome use the camera. Or pick photos with 🖼️.')
+        : e.name === 'NotFoundError' || e.name === 'OverconstrainedError' ? 'No camera found. Pick photos with 🖼️ instead.'
+        : e.name === 'NotReadableError' ? 'Another app is using the camera. Close it and try again.' : `Couldn’t start the camera (${e.name}). Pick photos with 🖼️ instead.`);
+    }
+  };
+  const finish = () => { stop(); $$('#camShots img', m).forEach(i => URL.revokeObjectURL(i.src)); const b = shots.splice(0); if (b.length) { toast(`📸 Saving ${plural(b.length, 'photo')}…`); attachPhotos(b, null); } };
+  m.addEventListener('close', finish, { once: true }); // closing any way (✕, back button, tapping outside) keeps the shots
+  m.onclick = async e => {
+    const a = e.target.closest('[data-cam]')?.dataset.cam;
+    if (a === 'done') return m.close();
+    if (a === 'flip') { facing = facing === 'user' ? 'environment' : 'user'; return start(); }
+    if (a === 'gallery') { photoTarget = null; return $('#photoInput').click(); }
+    if (a !== 'shoot' || busy || !video.videoWidth) return;
+    busy = true;
+    try {
+      const blob = await toJpeg(video, video.videoWidth, video.videoHeight);
+      shots.push(blob);
+      const fl = $('#camFlash', m); fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go');
+      navigator.vibrate?.(15);
+      const t = document.createElement('img'); t.src = URL.createObjectURL(blob); t.alt = `Photo ${shots.length}`;
+      $('#camShots', m).append(t);
+      $('[data-cam="done"]', m).textContent = `Done · ${plural(shots.length, 'photo')}`;
+    } catch (err) { console.error(err); toast('Couldn’t take that one. Try again?'); }
+    busy = false;
+  };
+  start();
+}
+const fab = $('#captureFab');
+fab.addEventListener('click', e => { photoTarget = null; if (hasCamera()) { e.preventDefault(); openCamera(); } }); // else the label opens #cameraInput
+fab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); photoTarget = null; hasCamera() ? openCamera() : $('#cameraInput').click(); } });
 
 // lightbox: a list of {key, id} so it can show one date's photos or a slideshow of all of them
 let lb = { list: [], i: 0, timer: null };
