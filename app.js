@@ -1333,7 +1333,7 @@ function openShare(d) {
 // passing the other person's push subscriptions, which live in the encrypted shared data as push:<person>:<device>.
 // The repo is public, so titles stay generic and never include the text of a note.
 const VAPID = 'BO1ihzt72rnPOfdwvC-E1JBNykAWJX6Qc02CZeLd3LQjgBOMP9nQjXpaCREPbda-GNoDZ8RZp2hnuXhP4q_3N6Y';
-const NOTIFY_TYPES = { love: '💖 I love yous', notes: '💌 Love notes', ask: '💍 Date questions' };
+const NOTIFY_TYPES = { love: '💖 I love yous', notes: '💌 Love notes', ask: '💍 Date questions', poop: '💨 Toots' };
 const deviceId = () => { let id = S.ls.get('device', null); if (!id) { id = S.uid(); S.ls.set('device', id); } return id; };
 const pushKey = (p = me()) => `push:${p}:${deviceId()}`;
 const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
@@ -1350,7 +1350,7 @@ async function enablePush() {
   if (!pushSupported()) throw new Error(isIOS() && !isInstalled() ? 'On iPhone, add hangouts to your home screen first, then open it from there and turn this on.' : 'This browser can’t show notifications.');
   if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications are blocked. Allow them for this site in your phone’s settings, then try again.');
   const sub = await subscribe();
-  S.put(pushKey(), { sub: sub.toJSON(), prefs: S.get(pushKey())?.prefs || { love: true, notes: true, ask: true }, device: deviceName(), at: Date.now() }, `feat(notify): ${nameOf(me())} turned on notifications 🔔`);
+  S.put(pushKey(), { sub: sub.toJSON(), prefs: S.get(pushKey())?.prefs || { love: true, notes: true, ask: true, poop: true }, device: deviceName(), at: Date.now() }, `feat(notify): ${nameOf(me())} turned on notifications 🔔`);
 }
 async function disablePush() {
   try { await (await navigator.serviceWorker.getRegistration())?.pushManager.getSubscription().then(s => s?.unsubscribe()); } catch {}
@@ -1498,6 +1498,181 @@ function showLove(by, n, away) {
   }, 650);
 }
 $('#loveFab').addEventListener('click', loveTap);
+
+// ---- fart engine ------------------------------------------------------------------------
+// Every fart is synthesised (no audio files): a buzzing oscillator gliding in pitch, chopped by a "lip flutter"
+// tremolo, plus filtered noise for wetness. A seed picks the kind and every parameter, so the other phone can
+// replay exactly the farts that were sent.
+let actx = null, noiseBuf = null, master = null;
+function audio() {
+  if (!actx) {
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    // a limiter, so a fast streak of overlapping farts gets louder, not distorted
+    master = actx.createDynamicsCompressor(); master.threshold.value = -20; master.knee.value = 0; master.ratio.value = 20; master.attack.value = 0.003; master.release.value = 0.15;
+    const loud = actx.createGain(); loud.gain.value = 1.5; master.connect(loud).connect(actx.destination);
+  }
+  if (actx.state === 'suspended') actx.resume().catch(() => {});
+  return actx;
+}
+const audioReady = () => !!actx && actx.state === 'running';
+const prng = seed => () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+const FART_KINDS = ['classic', 'squeaker', 'wet', 'machinegun', 'tuba', 'long', 'sputter', 'question'];
+const fartKind = seed => FART_KINDS[seed % FART_KINDS.length];
+let lastKind = -1;
+/** A fresh seed whose kind differs from the previous one, so back-to-back taps never sound alike. */
+function newFartSeed() {
+  let s; do { s = crypto.getRandomValues(new Uint32Array(1))[0]; } while (s % FART_KINDS.length === lastKind);
+  lastKind = s % FART_KINDS.length;
+  return s;
+}
+function puff(ctx, t, d, f0, f1, wet, flutter, r) {
+  const peak = 0.24;
+  const out = ctx.createGain(); out.connect(master);
+  out.gain.setValueAtTime(0.0001, t); out.gain.exponentialRampToValueAtTime(peak, t + 0.012);
+  out.gain.setValueAtTime(peak, t + d * (0.55 + r() * 0.3)); out.gain.exponentialRampToValueAtTime(0.0001, t + d);
+  const osc = ctx.createOscillator(); osc.type = r() < 0.6 ? 'sawtooth' : 'square';
+  osc.frequency.setValueAtTime(f0, t); osc.frequency.exponentialRampToValueAtTime(Math.max(25, f1), t + d);
+  const wob = ctx.createOscillator(), wobG = ctx.createGain(); wob.frequency.value = 3 + r() * 9; wobG.gain.value = f0 * (0.06 + r() * 0.14);
+  wob.connect(wobG).connect(osc.frequency);
+  const am = ctx.createGain(); am.gain.value = 0.55;
+  const lfo = ctx.createOscillator(), lfoG = ctx.createGain(); lfo.type = 'square'; lfo.frequency.value = flutter; lfoG.gain.value = 0.45;
+  lfo.connect(lfoG).connect(am.gain);
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 350 + f0 * (2 + r() * 3); lp.Q.value = 1.5 + r() * 7;
+  osc.connect(lp).connect(am).connect(out);
+  const n = ctx.createBufferSource(); n.buffer = noiseBuf ||= (() => {
+    const b = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), c = b.getChannelData(0);
+    for (let i = 0; i < c.length; i++) c[i] = Math.random() * 2 - 1;
+    return b;
+  })();
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 250 + r() * 800; bp.Q.value = 0.7 + r();
+  const ng = ctx.createGain(); ng.gain.value = wet;
+  n.connect(bp).connect(ng).connect(am);
+  for (const s of [osc, wob, lfo]) { s.start(t); s.stop(t + d + 0.05); }
+  n.start(t, r()); n.stop(t + d + 0.05);
+}
+/** Play one fart from its seed, `when` seconds from now. Returns its length in seconds. */
+function fart(seed, when = 0) {
+  const ctx = audio(), r = prng(seed), t0 = ctx.currentTime + 0.02 + when;
+  let dur = 0.25 + r() * 0.55, f0 = 70 + r() * 90, f1 = f0 * (0.55 + r() * 0.5), wet = 0.12 + r() * 0.25, flutter = 16 + r() * 22, bursts = 1;
+  switch (fartKind(seed)) {
+    case 'squeaker': f0 = 260 + r() * 260; f1 = f0 * (0.7 + r() * 0.7); dur = 0.15 + r() * 0.35; wet = 0.04; flutter = 34 + r() * 26; break;
+    case 'wet': f0 = 55 + r() * 45; wet = 0.6 + r() * 0.35; dur = 0.35 + r() * 0.5; flutter = 11 + r() * 10; break;
+    case 'machinegun': bursts = 3 + Math.floor(r() * 5); dur = 0.06 + r() * 0.07; break;
+    case 'tuba': f0 = 42 + r() * 25; f1 = f0 * (0.8 + r() * 0.3); dur = 0.6 + r() * 0.7; wet = 0.08; flutter = 9 + r() * 8; break;
+    case 'long': dur = 1.2 + r() * 1.1; f1 = f0 * (0.35 + r() * 0.3); break;
+    case 'sputter': bursts = 2 + Math.floor(r() * 3); dur = 0.12 + r() * 0.22; wet = 0.35 + r() * 0.3; break;
+    case 'question': f1 = f0 * (1.5 + r() * 0.9); dur = 0.35 + r() * 0.4; break;
+  }
+  let t = t0;
+  for (let i = 0; i < bursts; i++) {
+    const d = dur * (0.7 + r() * 0.6);
+    puff(ctx, t, d, f0 * (0.88 + r() * 0.24), f1, wet, flutter, r);
+    t += d + (bursts > 1 ? 0.025 + r() * 0.08 : 0);
+  }
+  return t - t0;
+}
+/** Play a few farts back to back (the received ones). */
+function fartSequence(seeds) {
+  let at = 0;
+  for (const s of seeds.slice(0, 8)) at += fart(s, at) + 0.12;
+  return at;
+}
+
+// ---- 💨 toot button ----------------------------------------------------------------------
+// Works like I love you: each tap plays a different fart and puffs, taps are batched into one poop:<id> record
+// ({by, n, seeds}) and one notification. The button is small and faded on purpose.
+const POOP_COMBO = { 3: 'toot toot', 5: 'pfffft', 10: 'silent but deadly', 15: '🚨 hazmat', 25: 'call a plumber 🪠', 50: 'biohazard ☣️', 100: 'legendary stinker 👑' };
+let poopN = 0, poopSeeds = [], poopTimer = null;
+const poopTotal = p => S.all('poop:').filter(x => x.by === p).reduce((s, x) => s + (x.n || 0), 0);
+function poopTap() {
+  const fab = $('#poopFab'), r = fab.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const seed = newFartSeed();
+  try { fart(seed); } catch (e) { console.warn('no audio', e); }
+  poopN++; if (poopSeeds.length < 20) poopSeeds.push(seed);
+  clearTimeout(poopTimer); poopTimer = setTimeout(poopSend, 1800);
+  fab.classList.add('busy');
+  const c = $('#poopCount'); c.hidden = false; c.textContent = `×${poopN}`;
+  navigator.vibrate?.([30, 15, 30, 15, 50]);
+  if (reduceMotion) return;
+  fab.animate([{ transform: 'rotate(0) scale(1)' }, { transform: 'rotate(-14deg) scale(1.2, .85)' }, { transform: 'rotate(10deg) scale(.9, 1.12)' }, { transform: 'rotate(-5deg) scale(1.05)' }, { transform: 'rotate(0) scale(1)' }],
+    { duration: 480, easing: 'cubic-bezier(.34, 1.56, .64, 1)' });
+  c.animate([{ transform: 'scale(1.5) rotate(8deg)' }, { transform: 'scale(1) rotate(0)' }], { duration: 300, easing: 'cubic-bezier(.34, 1.56, .64, 1)' });
+  const cloud = document.createElement('span'); cloud.className = 'stink-cloud'; cloud.style.left = cx + 'px'; cloud.style.top = cy + 'px';
+  $('#loveFx').append(cloud);
+  cloud.animate([{ transform: 'translate(-50%, -50%) scale(.3)', opacity: .8 }, { transform: 'translate(-50%, -50%) scale(2.6)', opacity: 0 }], { duration: 900, easing: 'ease-out' }).onfinish = () => cloud.remove();
+  const kind = fartKind(seed), puffs = kind === 'machinegun' ? 5 : kind === 'long' || kind === 'tuba' ? 4 : 2 + Math.min(Math.floor(poopN / 6), 3);
+  for (let i = 0; i < puffs; i++) setTimeout(() => floatUp(i % 3 === 2 ? '💩' : '💨', cx + rand(-8, 8), cy, 'stink-puff', { dx: rand(20, 120), up: rand(70, 170), scale: rand(.8, 1.4), duration: rand(1100, 1700) }), i * 70);
+  if (POOP_COMBO[poopN]) floatUp(POOP_COMBO[poopN], cx + 60, cy - 30, 'stink-combo', { dx: 20, up: 110, scale: 1, duration: 1700 });
+  if (poopN % 10 === 0 && window.confetti) {
+    const shapes = confetti.shapeFromText ? ['💩', '💨'].map(t => confetti.shapeFromText({ text: t, scalar: 2 })) : undefined;
+    confetti({ particleCount: 20 + Math.min(poopN, 50), spread: 60, startVelocity: 28, scalar: 1.6, ticks: 150, shapes, angle: 70, origin: { x: cx / innerWidth, y: cy / innerHeight } });
+  }
+}
+function poopSend() {
+  clearTimeout(poopTimer); poopTimer = null;
+  const n = poopN, seeds = poopSeeds; if (!n) return;
+  poopN = 0; poopSeeds = [];
+  S.put('poop:' + S.uid(), { by: me(), n, seeds, at: Date.now() }, `feat(toot): ${nameOf(me())} tooted ×${n} 💨`);
+  notify('poop', `💨 ${nameOf(me())}`, n === 1 ? 'pfffft 💩' : `pfffft ×${n.toLocaleString()} 💩`);
+  toast(`💨 Sent to ${nameOf(other(me()))}${n > 1 ? ` ×${n}` : ''}`);
+  $('#poopFab').classList.remove('busy');
+  const c = $('#poopCount');
+  if (reduceMotion) { c.hidden = true; return; }
+  c.animate([{ transform: 'translate(0, 0)', opacity: 1 }, { transform: 'translate(30px, -50vh) rotate(40deg)', opacity: 0 }], { duration: 800, easing: 'cubic-bezier(.5, 0, .75, 0)' }).onfinish = () => { if (!poopN) c.hidden = true; };
+}
+addEventListener('pagehide', poopSend);
+document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && poopSend());
+$('#poopFab').addEventListener('click', poopTap);
+
+// Received toots: a stink show that plays the sender's exact farts. Browsers only allow sound after a tap on
+// this page, so if it's blocked, the show offers a 🔊 button instead.
+function poopAlert() {
+  const all = S.all('poop:'), seen = new Set(S.ls.get('poopSeen', []));
+  let since = S.ls.get('poopSince', 0);
+  if (!since) S.ls.set('poopSince', since = Date.now() - 6 * 36e5);
+  const fresh = all.filter(x => x.by !== me() && !seen.has(x.key) && x.at > since);
+  if (!fresh.length || $('#lock').hidden === false || document.querySelector('.love-show')) return;
+  S.ls.set('poopSeen', all.map(x => x.key));
+  showPoop(fresh[0].by, fresh.reduce((s, x) => s + (x.n || 0), 0), fresh.flatMap(x => x.seeds || []).slice(-8));
+}
+function showPoop(by, n, seeds) {
+  document.querySelector('.poop-show')?.remove();
+  const el = document.createElement('div');
+  el.className = 'poop-show'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', `${nameOf(by)} farted at you, ${n} times`);
+  el.innerHTML = `
+    <div class="ps-stink" aria-hidden="true"></div>
+    <div class="ps-card">
+      <div class="ps-poop" aria-hidden="true"><span>💩</span></div>
+      <p class="ls-from">${esc(nameOf(by))}</p>
+      <h2 class="ls-title">farted at you</h2>
+      <div class="ls-count">×<b>${reduceMotion ? n.toLocaleString() : 0}</b></div>
+      <p class="ls-sub">${poopTotal(by).toLocaleString()} toots all time</p>
+      <div class="ps-btns"><button class="btn ghost ps-play">🔊 Play it</button><button class="btn primary ps-back">💨 Fart back</button></div>
+    </div>`;
+  document.body.append(el);
+  const play = () => { try { fartSequence(seeds.length ? seeds : [newFartSeed()]); } catch {} };
+  const close = () => { if (!el.isConnected) return; clearTimeout(auto); el.classList.add('out'); setTimeout(() => el.remove(), reduceMotion ? 0 : 450); };
+  const auto = setTimeout(close, 10000);
+  el.addEventListener('click', e => {
+    if (e.target.closest('.ps-play')) return play();
+    if (e.target.closest('.ps-back')) { close(); return poopTap(); }
+    close();
+  });
+  addEventListener('keydown', function k(e) { if (e.key === 'Escape') { close(); removeEventListener('keydown', k); } });
+  navigator.vibrate?.([40, 20, 40, 20, 60, 20, 30, 20, 140]);
+  setTimeout(() => { audio(); if (audioReady()) { play(); $('.ps-play', el).textContent = '🔊 Again'; } }, 350); // plays now if this page has had a tap
+  if (reduceMotion) return;
+  const b = $('.ls-count b', el), t0 = performance.now(), dur = Math.min(500 + n * 30, 2000);
+  const step = t => { const k = Math.min((t - t0) / dur, 1); b.textContent = Math.round(n * (1 - Math.pow(1 - k, 3))).toLocaleString(); if (k < 1) requestAnimationFrame(step); else $('.ls-count', el).classList.add('done'); };
+  setTimeout(() => requestAnimationFrame(step), 450);
+  const stink = $('.ps-stink', el);
+  for (let i = 0, count = Math.min(10 + n, 36); i < count; i++) {
+    const h = document.createElement('span');
+    h.textContent = i % 5 === 0 ? '💩' : i % 7 === 0 ? '🤢' : '💨';
+    h.style.cssText = `left:${rand(0, 100)}%;font-size:${rand(20, 48)}px;--drift:${rand(-80, 80)}px;--spin:${rand(-60, 60)}deg;animation-duration:${rand(3.5, 6.5)}s;animation-delay:${rand(0, 2.5)}s`;
+    stink.append(h);
+  }
+}
 
 // ---- settings / identity --------------------------------------------------------
 function pickMe() {
@@ -1652,7 +1827,7 @@ function noteAlert() {
   if (tab === 'ask' && n.length) S.ls.set('notesSeen', n[0].at); // seen once the front page shows it
 }
 S.onChange(what => {
-  if (what === 'items') { render(); noteAlert(); loveAlert(); return; }
+  if (what === 'items') { render(); noteAlert(); loveAlert(); poopAlert(); return; }
   renderSync();
   if (S.status.state === 'ok') $$('.thumb.missing img[data-photo]').forEach(img => { img.closest('.thumb').classList.remove('missing'); hydratePhotos(img.closest('.thumb')); });
 });
@@ -1670,4 +1845,5 @@ else if (!S.ls.get('me', null) && S.get('cfg:people')) pickMe();
 S.sync().then(pushCheck);
 noteAlert();
 loveAlert();
+poopAlert();
 loadWeather();

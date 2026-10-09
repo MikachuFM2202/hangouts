@@ -9,7 +9,9 @@ self.addEventListener('push', e => {
   e.waitUntil((async () => {
     await self.registration.showNotification(d.title || 'hangouts', {
       body: d.body || '', tag: d.tag || undefined, renotify: !!d.tag, icon: 'icon-192.png', badge: 'icon-192.png',
-      data: { hash: /^#\w+$/.test(d.url || '') ? d.url : '#ask' }, vibrate: [80, 60, 80, 60, 160],
+      data: { hash: /^#\w+$/.test(d.url || '') ? d.url : '#ask' },
+      // web push can't play a custom sound, so toots get a fart-rhythm buzz instead
+      vibrate: d.tag === 'poop' ? [40, 20, 40, 20, 60, 20, 30, 20, 140] : [80, 60, 80, 60, 160],
     });
     // An open app syncs straight away, so the love animation plays without waiting for the 30s poll.
     (await self.clients.matchAll({ type: 'window' })).forEach(c => c.postMessage({ type: 'push' }));

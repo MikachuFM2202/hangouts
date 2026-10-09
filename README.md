@@ -14,6 +14,7 @@ A little web app for two people: ask each other out, find days you're both free,
 | 🎮 Activities | 71 ways to do things together: watch-together sites like Scener and Teleparty, browser games, phone games, co-op games, couple apps and things to create or explore. Search and a Free-only filter. |
 | 📷 Memories | Past dates by month, with ratings, best moments and photos. |
 | 💖 button | Tap **I love you** as many times as you like. Each tap floats hearts; after a short pause one message goes out, "I love you ×27", and the other phone plays a full-screen heart show. |
+| 💨 button | The faded little bubble by 💖. Each tap plays a different synthesised fart (8 kinds, never the same kind twice in a row). Taps batch into one toot like I love you, and the other phone gets a fart-rhythm buzz, then a stink show that replays the exact farts. |
 | 📸 button | Opens the camera. Photos attach to today's date. |
 
 ## Sharing between two phones
