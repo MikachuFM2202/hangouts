@@ -56,7 +56,9 @@ const emit = what => listeners.forEach(f => f(what));
 function setStatus(state, error = '') { status.state = state; status.error = error; emit('status'); }
 
 export const get = k => (items[k] && !items[k].del ? items[k] : null);
-export const all = prefix => Object.entries(items).filter(([k, v]) => k.startsWith(prefix) && !v.del).map(([k, v]) => ({ ...v, key: k }));
+// Cached per prefix: every plan card asks for all photos, which was a full scan per card.
+let byPrefix = {};
+export const all = prefix => (byPrefix[prefix] ??= Object.entries(items).filter(([k, v]) => k.startsWith(prefix) && !v.del).map(([k, v]) => ({ ...v, key: k }))).slice();
 
 /** Write one item. `quiet` skips re-rendering (used mid-drag on the calendar); call note() after. */
 export function put(k, val, msg, quiet) {
@@ -70,6 +72,7 @@ export function remove(k, msg) {
 }
 export const note = msg => save(msg);
 function save(msg, quiet) {
+  byPrefix = {};
   ls.set('items', items);
   if (msg) msgs.push(msg);
   if (!quiet) emit('items');
@@ -126,7 +129,7 @@ export function sync() {
       for (let attempt = 0; ; attempt++) {
         const remote = await readData();
         const merged = merge(remote.items, items);
-        if (!same(merged, items)) { items = merged; ls.set('items', items); emit('items'); }
+        if (!same(merged, items)) { items = merged; byPrefix = {}; ls.set('items', items); emit('items'); }
         if (same(merged, remote.items)) break;
         try {
           await putFile('data.enc', b64(await seal(te.encode(JSON.stringify(merged)))), remote.sha, commitMsg());
@@ -277,4 +280,10 @@ export function lock() {
 }
 
 export const exportItems = () => JSON.stringify(items, null, 2);
-export function importItems(obj) { items = merge(items, obj); save('chore: restore from backup'); }
+/** Restore a backup. Rejects anything that isn't our {key: {…, u}} map, so a wrong file can't corrupt (and sync) junk. */
+export function importItems(obj) {
+  const isMap = o => o && typeof o === 'object' && !Array.isArray(o);
+  const entries = isMap(obj) ? Object.entries(obj) : [];
+  if (!entries.length || !entries.every(([k, v]) => k.includes(':') && isMap(v) && Number.isFinite(v.u))) throw new Error('not a hangouts backup');
+  items = merge(items, obj); save('chore: restore from backup');
+}

@@ -51,6 +51,7 @@ const daysTogether = () => { const s = people().start; return s ? Math.max(0, Ma
 function milestone() {
   const start = people().start; if (!start) return null;
   const s = parseDay(start), now = parseDay(today()), n = Math.round((now - s) / 864e5);
+  if (n < 0) return null; // start date in the future: nothing to count yet
   const at = days => { const d = new Date(s); d.setDate(d.getDate() + days); return d; };
   let next100 = (Math.floor(n / 100) + 1) * 100;
   const yrs = now.getFullYear() - s.getFullYear();
