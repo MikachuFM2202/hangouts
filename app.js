@@ -1473,15 +1473,16 @@ function showLove(by, n, away) {
       <button class="btn primary ls-back">💖 Say it back</button>
     </div>`;
   document.body.append(el);
-  const close = () => { if (!el.isConnected) return; clearTimeout(auto); el.classList.add('out'); setTimeout(() => el.remove(), reduceMotion ? 0 : 450); };
+  const onKey = e => e.key === 'Escape' && close();
+  const close = () => { if (!el.isConnected) return; clearTimeout(auto); removeEventListener('keydown', onKey); el.classList.add('out'); setTimeout(() => el.remove(), reduceMotion ? 0 : 450); };
   const auto = setTimeout(close, 9000);
   el.addEventListener('click', e => { if (e.target.closest('.ls-back')) { close(); loveTap(); } else close(); });
-  addEventListener('keydown', function esc_(e) { if (e.key === 'Escape') { close(); removeEventListener('keydown', esc_); } });
-  navigator.vibrate?.([60, 80, 60, 80, 200]);
+  addEventListener('keydown', onKey);
+  navigator.vibrate?.([60, 80, 60, 80, 200]); ding();
   if (reduceMotion) return;
   // count up with an ease-out, so big numbers rush then settle
-  const b = $('.ls-count b', el), t0 = performance.now(), dur = Math.min(600 + n * 25, 2200);
-  const step = t => { const k = Math.min((t - t0) / dur, 1), v = Math.round(n * (1 - Math.pow(1 - k, 3))); b.textContent = v.toLocaleString(); if (k < 1) requestAnimationFrame(step); else $('.ls-count', el).classList.add('done'); };
+  const b = $('.ls-count b', el), dur = Math.min(600 + n * 25, 2200);
+  let t0; const step = t => { t0 ??= t; const k = Math.min((t - t0) / dur, 1), v = Math.round(n * (1 - Math.pow(1 - k, 3))); b.textContent = v.toLocaleString(); if (k < 1) requestAnimationFrame(step); else $('.ls-count', el).classList.add('done'); };
   setTimeout(() => requestAnimationFrame(step), 450);
   // heart rain, denser for bigger numbers
   const rain = $('.ls-rain', el);
@@ -1500,83 +1501,41 @@ function showLove(by, n, away) {
 $('#loveFab').addEventListener('click', loveTap);
 
 // ---- fart engine ------------------------------------------------------------------------
-// Every fart is synthesised (no audio files): a buzzing oscillator gliding in pitch, chopped by a "lip flutter"
-// tremolo, plus filtered noise for wetness. A seed picks the kind and every parameter, so the other phone can
-// replay exactly the farts that were sent.
-let actx = null, noiseBuf = null, master = null;
+// Farts are mp3 samples in sounds/. A seed picks the sample and its pitch, so the other phone replays exactly
+// the farts that were sent. notify.mp3 is the "you got something" sound for incoming love, notes and toots.
+let actx = null, master = null;
+const FART_FILES = ['dry', 'perfect'], bufs = {};
+const raw = Object.fromEntries(['notify', ...FART_FILES].map(n => [n, fetch(`sounds/${n}.mp3`).then(r => r.arrayBuffer())]));
 function audio() {
   if (!actx) {
     actx = new (window.AudioContext || window.webkitAudioContext)();
     // a limiter, so a fast streak of overlapping farts gets louder, not distorted
-    master = actx.createDynamicsCompressor(); master.threshold.value = -20; master.knee.value = 0; master.ratio.value = 20; master.attack.value = 0.003; master.release.value = 0.15;
-    const loud = actx.createGain(); loud.gain.value = 1.5; master.connect(loud).connect(actx.destination);
+    master = actx.createDynamicsCompressor(); master.threshold.value = -12; master.knee.value = 0; master.ratio.value = 20; master.attack.value = 0.003; master.release.value = 0.15;
+    master.connect(actx.destination);
+    for (const [n, p] of Object.entries(raw)) bufs[n] = p.then(b => new Promise((ok, no) => actx.decodeAudioData(b, ok, no)));
   }
-  if (actx.state === 'suspended') actx.resume().catch(() => {});
+  if (actx.state !== 'running') actx.resume().catch(() => {});
   return actx;
 }
 const audioReady = () => !!actx && actx.state === 'running';
 const prng = seed => () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
-const FART_KINDS = ['classic', 'squeaker', 'wet', 'machinegun', 'tuba', 'long', 'sputter', 'question'];
-const fartKind = seed => FART_KINDS[seed % FART_KINDS.length];
-let lastKind = -1;
-/** A fresh seed whose kind differs from the previous one, so back-to-back taps never sound alike. */
-function newFartSeed() {
-  let s; do { s = crypto.getRandomValues(new Uint32Array(1))[0]; } while (s % FART_KINDS.length === lastKind);
-  lastKind = s % FART_KINDS.length;
-  return s;
+const fartFile = seed => FART_FILES[seed % FART_FILES.length];
+const newFartSeed = () => crypto.getRandomValues(new Uint32Array(1))[0];
+/** Play a sample `when` seconds from now. Resolves to its length in seconds. */
+async function playSound(name, when = 0, rate = 1) {
+  const ctx = audio(), src = ctx.createBufferSource();
+  src.buffer = await bufs[name]; src.playbackRate.value = rate;
+  src.connect(master); src.start(ctx.currentTime + when);
+  return src.buffer.duration / rate;
 }
-function puff(ctx, t, d, f0, f1, wet, flutter, r) {
-  const peak = 0.24;
-  const out = ctx.createGain(); out.connect(master);
-  out.gain.setValueAtTime(0.0001, t); out.gain.exponentialRampToValueAtTime(peak, t + 0.012);
-  out.gain.setValueAtTime(peak, t + d * (0.55 + r() * 0.3)); out.gain.exponentialRampToValueAtTime(0.0001, t + d);
-  const osc = ctx.createOscillator(); osc.type = r() < 0.6 ? 'sawtooth' : 'square';
-  osc.frequency.setValueAtTime(f0, t); osc.frequency.exponentialRampToValueAtTime(Math.max(25, f1), t + d);
-  const wob = ctx.createOscillator(), wobG = ctx.createGain(); wob.frequency.value = 3 + r() * 9; wobG.gain.value = f0 * (0.06 + r() * 0.14);
-  wob.connect(wobG).connect(osc.frequency);
-  const am = ctx.createGain(); am.gain.value = 0.55;
-  const lfo = ctx.createOscillator(), lfoG = ctx.createGain(); lfo.type = 'square'; lfo.frequency.value = flutter; lfoG.gain.value = 0.45;
-  lfo.connect(lfoG).connect(am.gain);
-  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 350 + f0 * (2 + r() * 3); lp.Q.value = 1.5 + r() * 7;
-  osc.connect(lp).connect(am).connect(out);
-  const n = ctx.createBufferSource(); n.buffer = noiseBuf ||= (() => {
-    const b = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate), c = b.getChannelData(0);
-    for (let i = 0; i < c.length; i++) c[i] = Math.random() * 2 - 1;
-    return b;
-  })();
-  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 250 + r() * 800; bp.Q.value = 0.7 + r();
-  const ng = ctx.createGain(); ng.gain.value = wet;
-  n.connect(bp).connect(ng).connect(am);
-  for (const s of [osc, wob, lfo]) { s.start(t); s.stop(t + d + 0.05); }
-  n.start(t, r()); n.stop(t + d + 0.05);
-}
-/** Play one fart from its seed, `when` seconds from now. Returns its length in seconds. */
-function fart(seed, when = 0) {
-  const ctx = audio(), r = prng(seed), t0 = ctx.currentTime + 0.02 + when;
-  let dur = 0.25 + r() * 0.55, f0 = 70 + r() * 90, f1 = f0 * (0.55 + r() * 0.5), wet = 0.12 + r() * 0.25, flutter = 16 + r() * 22, bursts = 1;
-  switch (fartKind(seed)) {
-    case 'squeaker': f0 = 260 + r() * 260; f1 = f0 * (0.7 + r() * 0.7); dur = 0.15 + r() * 0.35; wet = 0.04; flutter = 34 + r() * 26; break;
-    case 'wet': f0 = 55 + r() * 45; wet = 0.6 + r() * 0.35; dur = 0.35 + r() * 0.5; flutter = 11 + r() * 10; break;
-    case 'machinegun': bursts = 3 + Math.floor(r() * 5); dur = 0.06 + r() * 0.07; break;
-    case 'tuba': f0 = 42 + r() * 25; f1 = f0 * (0.8 + r() * 0.3); dur = 0.6 + r() * 0.7; wet = 0.08; flutter = 9 + r() * 8; break;
-    case 'long': dur = 1.2 + r() * 1.1; f1 = f0 * (0.35 + r() * 0.3); break;
-    case 'sputter': bursts = 2 + Math.floor(r() * 3); dur = 0.12 + r() * 0.22; wet = 0.35 + r() * 0.3; break;
-    case 'question': f1 = f0 * (1.5 + r() * 0.9); dur = 0.35 + r() * 0.4; break;
-  }
-  let t = t0;
-  for (let i = 0; i < bursts; i++) {
-    const d = dur * (0.7 + r() * 0.6);
-    puff(ctx, t, d, f0 * (0.88 + r() * 0.24), f1, wet, flutter, r);
-    t += d + (bursts > 1 ? 0.025 + r() * 0.08 : 0);
-  }
-  return t - t0;
-}
+/** Play one fart from its seed. Same seed, same sample and pitch on both phones. */
+const fart = (seed, when = 0) => playSound(fartFile(seed), when, 0.8 + prng(seed)() * 0.5);
 /** Play a few farts back to back (the received ones). */
-function fartSequence(seeds) {
-  let at = 0;
-  for (const s of seeds.slice(0, 8)) at += fart(s, at) + 0.12;
-  return at;
+async function fartSequence(seeds, at = 0) {
+  for (const s of seeds.slice(0, 8)) at += await fart(s, at) + 0.08;
 }
+/** The incoming-notification sound. Only plays if this page has had a tap, browsers block it otherwise. */
+function ding() { audio(); if (audioReady()) playSound('notify').catch(() => {}); }
 
 // ---- 💨 toot button ----------------------------------------------------------------------
 // Works like I love you: each tap plays a different fart and puffs, taps are batched into one poop:<id> record
@@ -1587,7 +1546,7 @@ const poopTotal = p => S.all('poop:').filter(x => x.by === p).reduce((s, x) => s
 function poopTap() {
   const fab = $('#poopFab'), r = fab.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
   const seed = newFartSeed();
-  try { fart(seed); } catch (e) { console.warn('no audio', e); }
+  fart(seed).catch(e => console.warn('no audio', e));
   poopN++; if (poopSeeds.length < 20) poopSeeds.push(seed);
   clearTimeout(poopTimer); poopTimer = setTimeout(poopSend, 1800);
   fab.classList.add('busy');
@@ -1600,7 +1559,7 @@ function poopTap() {
   const cloud = document.createElement('span'); cloud.className = 'stink-cloud'; cloud.style.left = cx + 'px'; cloud.style.top = cy + 'px';
   $('#loveFx').append(cloud);
   cloud.animate([{ transform: 'translate(-50%, -50%) scale(.3)', opacity: .8 }, { transform: 'translate(-50%, -50%) scale(2.6)', opacity: 0 }], { duration: 900, easing: 'ease-out' }).onfinish = () => cloud.remove();
-  const kind = fartKind(seed), puffs = kind === 'machinegun' ? 5 : kind === 'long' || kind === 'tuba' ? 4 : 2 + Math.min(Math.floor(poopN / 6), 3);
+  const puffs = 2 + Math.min(Math.floor(poopN / 6), 3);
   for (let i = 0; i < puffs; i++) setTimeout(() => floatUp(i % 3 === 2 ? '💩' : '💨', cx + rand(-8, 8), cy, 'stink-puff', { dx: rand(20, 120), up: rand(70, 170), scale: rand(.8, 1.4), duration: rand(1100, 1700) }), i * 70);
   if (POOP_COMBO[poopN]) floatUp(POOP_COMBO[poopN], cx + 60, cy - 30, 'stink-combo', { dx: 20, up: 110, scale: 1, duration: 1700 });
   if (poopN % 10 === 0 && window.confetti) {
@@ -1650,20 +1609,21 @@ function showPoop(by, n, seeds) {
       <div class="ps-btns"><button class="btn ghost ps-play">🔊 Play it</button><button class="btn primary ps-back">💨 Fart back</button></div>
     </div>`;
   document.body.append(el);
-  const play = () => { try { fartSequence(seeds.length ? seeds : [newFartSeed()]); } catch {} };
-  const close = () => { if (!el.isConnected) return; clearTimeout(auto); el.classList.add('out'); setTimeout(() => el.remove(), reduceMotion ? 0 : 450); };
+  const play = (at = 0) => fartSequence(seeds.length ? seeds : [newFartSeed()], at).catch(() => {});
+  const onKey = e => e.key === 'Escape' && close();
+  const close = () => { if (!el.isConnected) return; clearTimeout(auto); removeEventListener('keydown', onKey); el.classList.add('out'); setTimeout(() => el.remove(), reduceMotion ? 0 : 450); };
   const auto = setTimeout(close, 10000);
   el.addEventListener('click', e => {
     if (e.target.closest('.ps-play')) return play();
     if (e.target.closest('.ps-back')) { close(); return poopTap(); }
     close();
   });
-  addEventListener('keydown', function k(e) { if (e.key === 'Escape') { close(); removeEventListener('keydown', k); } });
+  addEventListener('keydown', onKey);
   navigator.vibrate?.([40, 20, 40, 20, 60, 20, 30, 20, 140]);
-  setTimeout(() => { audio(); if (audioReady()) { play(); $('.ps-play', el).textContent = '🔊 Again'; } }, 350); // plays now if this page has had a tap
+  setTimeout(() => { audio(); if (audioReady()) { ding(); play(1.4); $('.ps-play', el).textContent = '🔊 Again'; } }, 350); // plays now if this page has had a tap
   if (reduceMotion) return;
-  const b = $('.ls-count b', el), t0 = performance.now(), dur = Math.min(500 + n * 30, 2000);
-  const step = t => { const k = Math.min((t - t0) / dur, 1); b.textContent = Math.round(n * (1 - Math.pow(1 - k, 3))).toLocaleString(); if (k < 1) requestAnimationFrame(step); else $('.ls-count', el).classList.add('done'); };
+  const b = $('.ls-count b', el), dur = Math.min(500 + n * 30, 2000);
+  let t0; const step = t => { t0 ??= t; const k = Math.min((t - t0) / dur, 1); b.textContent = Math.round(n * (1 - Math.pow(1 - k, 3))).toLocaleString(); if (k < 1) requestAnimationFrame(step); else $('.ls-count', el).classList.add('done'); };
   setTimeout(() => requestAnimationFrame(step), 450);
   const stink = $('.ps-stink', el);
   for (let i = 0, count = Math.min(10 + n, 36); i < count; i++) {
@@ -1823,7 +1783,7 @@ const unseenNotes = () => notes().filter(n => n.by !== me() && n.at > S.ls.get('
 function noteAlert() {
   const n = unseenNotes();
   $('.tab[data-tab="ask"]').classList.toggle('has-new', n.length > 0);
-  if (n.length && n[0].at > (S.ls.get('notesToasted', 0))) { S.ls.set('notesToasted', n[0].at); toast(`💌 New note from ${nameOf(n[0].by)}`, 4000); }
+  if (n.length && n[0].at > (S.ls.get('notesToasted', 0))) { S.ls.set('notesToasted', n[0].at); toast(`💌 New note from ${nameOf(n[0].by)}`, 4000); ding(); }
   if (tab === 'ask' && n.length) S.ls.set('notesSeen', n[0].at); // seen once the front page shows it
 }
 S.onChange(what => {
