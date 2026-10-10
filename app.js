@@ -532,7 +532,7 @@ function bindCalendar(v) {
   addEventListener('pointercancel', done, { signal: ac.signal });
   cleanup = () => ac.abort();
   grid.addEventListener('click', e => {
-    if (mouse) { mouse = false; return; }
+    if (mouse) { mouse = false; if (e.detail) return; } // detail 0 = keyboard, after a drag that ended outside the grid
     const el = e.target.closest('.day[data-day]'); if (!el || el.disabled) return;
     painting = true; touched = new Set(); mode = !isFree(me(), el.dataset.day); apply(el); done();
   });
@@ -1101,7 +1101,7 @@ fab.addEventListener('click', e => { photoTarget = null; if (hasCamera()) { e.pr
 fab.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); photoTarget = null; hasCamera() ? openCamera() : $('#cameraInput').click(); } });
 
 // lightbox: a list of {key, id} so it can show one date's photos or a slideshow of all of them
-let lb = { list: [], i: 0, timer: null };
+let lb = { list: [], i: 0, timer: null }, lbSwiped = 0;
 const photosOf = key => pics(key).map(id => ({ key, id }));
 function openLightbox(list, i, play = false) {
   lb = { list, i, timer: null, files: null }; showLb();
@@ -1129,7 +1129,7 @@ function showLb() {
 $('#lightbox').addEventListener('close', () => setPlay(false));
 $('#lightbox').addEventListener('click', e => {
   const a = e.target.closest('[data-lb]')?.dataset.lb;
-  if (a === 'close' || e.target === e.currentTarget) return $('#lightbox').close();
+  if (a === 'close' || (e.target === e.currentTarget && performance.now() - lbSwiped > 400)) return $('#lightbox').close();
   if (a === 'prev') { lb.i--; showLb(); setPlay(false); }
   if (a === 'next') { lb.i++; showLb(); setPlay(false); }
   if (a === 'play') setPlay(!lb.timer);
@@ -1152,7 +1152,13 @@ addEventListener('keydown', e => {
 });
 { let x0 = null;
   $('#lightbox').addEventListener('pointerdown', e => { x0 = e.target.closest('button') ? null : e.clientX; });
-  $('#lightbox').addEventListener('pointerup', e => { if (x0 != null && Math.abs(e.clientX - x0) > 50) { lb.i += e.clientX < x0 ? 1 : -1; showLb(); setPlay(false); } x0 = null; });
+  $('#lightbox').addEventListener('pointerup', e => {
+    if (x0 != null && Math.abs(e.clientX - x0) > 50) {
+      lb.i += e.clientX < x0 ? 1 : -1; showLb(); setPlay(false);
+      lbSwiped = performance.now(); // a mouse swipe ends in a click on the backdrop: don't let it close the lightbox
+    }
+    x0 = null;
+  });
 }
 
 // ---- global click actions -------------------------------------------------------
@@ -1318,7 +1324,7 @@ function openShare(d) {
   $('#shCopy', m).onclick = async () => { try { await navigator.clipboard.writeText(msg); toast('📋 Copied'); } catch { toast('Couldn’t copy. Select the text above instead.'); } };
   const ics = $('#shIcs', m);
   if (ics) ics.onclick = () => {
-    const [a, b] = eventTimes(d), e = x => String(x || '').replace(/[\;,]/g, c => '\\' + c).replace(/\n/g, '\\n');
+    const [a, b] = eventTimes(d), e = x => String(x || '').replace(/[\\;,]/g, c => '\\' + c).replace(/\n/g, '\\n');
     const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
     const dt = d.time ? ['DTSTART:' + a, 'DTEND:' + b] : ['DTSTART;VALUE=DATE:' + a, 'DTEND;VALUE=DATE:' + b];
     const body = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//hangouts//EN', 'BEGIN:VEVENT', `UID:${d.key.replace(':', '-')}@hangouts`, 'DTSTAMP:' + now, ...dt,

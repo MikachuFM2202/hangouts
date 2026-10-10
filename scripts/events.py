@@ -41,7 +41,7 @@ def km(lat, lon):
 def make(start, end, *, id, name, date, time='', end_date='', end_time='', venue='', area='', lat=None, lon=None, cat='', emoji='🎟️', summary='', url=''):
     """Our event dict, or None if it's outside the window, too far, unmappable, or a work thing."""
     name = html.unescape(name or '').strip()
-    if not name or not date or not url or not (start <= date < end) or SKIP.search(name) or cat == 'Business & Professional':
+    if not name or not date or not re.match(r'https?://', url or '') or not (start <= date < end) or SKIP.search(name) or cat == 'Business & Professional':
         return None
     try:
         dist = round(km(float(lat), float(lon)))
@@ -190,25 +190,26 @@ def collect(now):
 def check():
     w = ('2026-10-09', '2026-10-16')
     page = 'x __SERVER_DATA__ = ' + json.dumps({'search_data': {'events': {'pagination': {'page_count': 2}, 'results': [
-        {'id': 1, 'name': ' Jazz night ', 'start_date': '2026-10-10', 'start_time': '20:00', 'url': 'u',
+        {'id': 1, 'name': ' Jazz night ', 'start_date': '2026-10-10', 'start_time': '20:00', 'url': 'https://u',
          'tags': [{'prefix': 'EventbriteCategory', 'display_name': 'Music'}],
          'primary_venue': {'name': 'No Black Tie', 'address': {'latitude': '3.15', 'longitude': '101.71', 'city': 'Kuala Lumpur'}}},
-        {'id': 2, 'name': 'Webinar', 'start_date': '2026-10-10', 'is_online_event': True, 'url': 'u'},
-        {'id': 3, 'name': 'Penang walk', 'start_date': '2026-10-10', 'url': 'u', 'primary_venue': {'address': {'latitude': '5.41', 'longitude': '100.33'}}},
-        {'id': 5, 'name': 'Excel Training Course - HRDF', 'start_date': '2026-10-10', 'url': 'u', 'primary_venue': {'address': {'latitude': '3.15', 'longitude': '101.71'}}},
-        {'id': 4, 'name': 'Old', 'start_date': '2026-10-01', 'url': 'u', 'primary_venue': {'address': {'latitude': '3.15', 'longitude': '101.71'}}},
+        {'id': 2, 'name': 'Webinar', 'start_date': '2026-10-10', 'is_online_event': True, 'url': 'https://u'},
+        {'id': 3, 'name': 'Penang walk', 'start_date': '2026-10-10', 'url': 'https://u', 'primary_venue': {'address': {'latitude': '5.41', 'longitude': '100.33'}}},
+        {'id': 5, 'name': 'Excel Training Course - HRDF', 'start_date': '2026-10-10', 'url': 'https://u', 'primary_venue': {'address': {'latitude': '3.15', 'longitude': '101.71'}}},
+        {'id': 4, 'name': 'Old', 'start_date': '2026-10-01', 'url': 'https://u', 'primary_venue': {'address': {'latitude': '3.15', 'longitude': '101.71'}}},
     ]}}}) + ';</script>'
     rs, pages = eventbrite_results(page)
     got = [eventbrite_one(r, *w) for r in rs]
     assert pages == 2
+    assert make('2026-10-01', '2026-11-01', id=9, name='x', date='2026-10-10', url='javascript:alert(1)') is None
     assert got[0]['name'] == 'Jazz night' and got[0]['emoji'] == '🎵' and got[0]['km'] == 7, got[0]
     assert got[1:] == [None] * 4, got[1:]  # online, too far, work training, already over
 
     mu = '<script id="__NEXT_DATA__" type="application/json">' + json.dumps({'props': {'pageProps': {'__APOLLO_STATE__': {
-        'Event:1': {'id': '1', 'title': 'Board games', 'dateTime': '2026-10-10T15:00:00+08:00', 'eventType': 'PHYSICAL', 'eventUrl': 'm',
+        'Event:1': {'id': '1', 'title': 'Board games', 'dateTime': '2026-10-10T15:00:00+08:00', 'eventType': 'PHYSICAL', 'eventUrl': 'https://m',
                     'venue': {'name': 'Cafe', 'city': 'Petaling Jaya'}, 'description': 'Come play\nmore'},
-        'Event:2': {'id': '2', 'title': 'Online', 'dateTime': '2026-10-10T15:00:00+08:00', 'eventType': 'ONLINE', 'eventUrl': 'm'},
-        'Event:3': {'id': '3', 'title': 'Unknown town', 'dateTime': '2026-10-10T15:00:00+08:00', 'eventType': 'PHYSICAL', 'eventUrl': 'm', 'venue': {'city': 'Ipoh'}},
+        'Event:2': {'id': '2', 'title': 'Online', 'dateTime': '2026-10-10T15:00:00+08:00', 'eventType': 'ONLINE', 'eventUrl': 'https://m'},
+        'Event:3': {'id': '3', 'title': 'Unknown town', 'dateTime': '2026-10-10T15:00:00+08:00', 'eventType': 'PHYSICAL', 'eventUrl': 'https://m', 'venue': {'city': 'Ipoh'}},
     }}}}) + '</script>'
     got = [meetup_one(e, *w) for e in meetup_results(mu)]
     assert got[0]['time'] == '15:00' and got[0]['area'] == 'Petaling Jaya' and got[0]['summary'] == 'Come play', got[0]
@@ -216,7 +217,7 @@ def check():
 
     sat = int(datetime(2026, 10, 10, 20, 0, tzinfo=timezone.utc).timestamp())
     ae = allevents_one({'event_id': 9, 'eventname': 'Rock &amp; Roll', 'start_time': str(sat), 'end_time': str(sat), 'start_time_display': 'Sat Oct 10 2026 at 08:00 pm',
-                        'event_url': 'a', 'location': 'Zepp KL', 'categories': ['Concerts'], 'venue': {'city': 'Kuala Lumpur', 'latitude': '3.139', 'longitude': '101.69'}}, *w)
+                        'event_url': 'https://a', 'location': 'Zepp KL', 'categories': ['Concerts'], 'venue': {'city': 'Kuala Lumpur', 'latitude': '3.139', 'longitude': '101.69'}}, *w)
     assert ae['name'] == 'Rock & Roll' and ae['date'] == '2026-10-10' and ae['time'] == '20:00' and ae['emoji'] == '🎵', ae
     print('events ok')
 

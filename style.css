@@ -296,7 +296,7 @@ legend { font: 600 14px var(--sans); color: var(--accent-deep); padding: 0 6px; 
 .slot.pop { animation: pop .45s cubic-bezier(.34, 1.56, .64, 1); }
 
 /* ---------- lightbox ---------- */
-.lightbox { border: 0; padding: 0; background: transparent; max-width: 100vw; max-height: 100dvh; width: 100vw; height: 100dvh; }
+.lightbox { touch-action: pan-y pinch-zoom; border: 0; padding: 0; background: transparent; max-width: 100vw; max-height: 100dvh; width: 100vw; height: 100dvh; }
 .lightbox::backdrop { background: rgb(30 15 22 / .9); }
 .lightbox[open] { display: grid; place-items: center; }
 #lbImg { max-width: 94vw; max-height: 80dvh; border-radius: 14px; object-fit: contain; user-select: none; -webkit-user-drag: none; }
