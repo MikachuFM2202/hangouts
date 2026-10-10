@@ -1505,26 +1505,34 @@ $('#loveFab').addEventListener('click', loveTap);
 // the farts that were sent. notify.mp3 is the "you got something" sound for incoming love, notes and toots.
 let actx = null, master = null;
 const FART_FILES = ['dry', 'perfect'], bufs = {};
-const raw = Object.fromEntries(['notify', ...FART_FILES].map(n => [n, fetch(`sounds/${n}.mp3`).then(r => r.arrayBuffer())]));
 function audio() {
   if (!actx) {
     actx = new (window.AudioContext || window.webkitAudioContext)();
     // a limiter, so a fast streak of overlapping farts gets louder, not distorted
     master = actx.createDynamicsCompressor(); master.threshold.value = -12; master.knee.value = 0; master.ratio.value = 20; master.attack.value = 0.003; master.release.value = 0.15;
     master.connect(actx.destination);
-    for (const [n, p] of Object.entries(raw)) bufs[n] = p.then(b => new Promise((ok, no) => actx.decodeAudioData(b, ok, no)));
   }
   if (actx.state !== 'running') actx.resume().catch(() => {});
   return actx;
 }
 const audioReady = () => !!actx && actx.state === 'running';
+// Loaded on first use. A failed load (offline, app opened in the background) is forgotten, so the next tap retries
+// instead of staying silent until the app restarts.
+const loadSound = name => bufs[name] ??= fetch(`sounds/${name}.mp3`)
+  .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
+  .then(b => new Promise((ok, no) => audio().decodeAudioData(b, ok, no)))
+  .catch(e => { delete bufs[name]; throw e; });
+// warm up on the first touch, so the first fart doesn't wait on the download
+addEventListener('pointerdown', () => ['notify', ...FART_FILES].forEach(n => loadSound(n).catch(() => {})), { once: true });
+let soundWarned = false;
+const soundFailed = e => { console.warn('no audio', e); if (!soundWarned) { soundWarned = true; toast(`🔇 Couldn’t play the sound (${e?.message || e})`); } };
 const prng = seed => () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
 const fartFile = seed => FART_FILES[seed % FART_FILES.length];
 const newFartSeed = () => crypto.getRandomValues(new Uint32Array(1))[0];
 /** Play a sample `when` seconds from now. Resolves to its length in seconds. */
 async function playSound(name, when = 0, rate = 1) {
   const ctx = audio(), src = ctx.createBufferSource();
-  src.buffer = await bufs[name]; src.playbackRate.value = rate;
+  src.buffer = await loadSound(name); src.playbackRate.value = rate;
   src.connect(master); src.start(ctx.currentTime + when);
   return src.buffer.duration / rate;
 }
@@ -1546,7 +1554,7 @@ const poopTotal = p => S.all('poop:').filter(x => x.by === p).reduce((s, x) => s
 function poopTap() {
   const fab = $('#poopFab'), r = fab.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
   const seed = newFartSeed();
-  fart(seed).catch(e => console.warn('no audio', e));
+  fart(seed).catch(soundFailed);
   poopN++; if (poopSeeds.length < 20) poopSeeds.push(seed);
   clearTimeout(poopTimer); poopTimer = setTimeout(poopSend, 1800);
   fab.classList.add('busy');
