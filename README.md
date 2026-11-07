@@ -9,6 +9,7 @@ A little web app for two people: ask each other out, find days you're both free,
 | 💌 Ask | "Will you go on a date with me?" The No button glides away from your cursor or finger and never lands on a link or button. Yes ends with confetti. |
 | 📅 Calendar | Each of you taps the days you're free. Days you're both free turn purple. |
 | ✨ Plans | Upcoming dates, a countdown to the next one, ideas saved for later. |
+| 🫶 Likes | Each person's likes and dislikes by category (food, drinks, sports, movies & shows, music, places, gifts, other), plus icks. Filter by person or category. Either of you can add or change items. |
 | 💡 Ideas | 156 daytime date ideas around KL (100 of them 🔥 trending), all under RM150 for two. Search, filter by type, budget and distance, save to Plans. |
 | 🎟️ What’s on | Real events in KL and nearby for the next month (refreshed every Friday at 5am, or any time with **Find new events**), from Meetup and allevents.in, plus Eventbrite when it's reachable (Eventbrite blocks GitHub's servers, so it only shows up when `scripts/events.py` runs from a home connection). Work trainings, conferences and webinars are left out. Filter by daytime or weekend, add one to Plans. **Find new events** asks GitHub to search again right away. |
 | 🎮 Activities | 71 ways to do things together: watch-together sites like Scener and Teleparty, browser games, phone games, co-op games, couple apps and things to create or explore. Search and a Free-only filter. |

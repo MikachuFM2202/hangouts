@@ -214,7 +214,7 @@ const burst = () => {
 };
 
 // ---- router -------------------------------------------------------------------
-const TABS = ['ask', 'calendar', 'plans', 'ideas', 'week', 'activities', 'memories'];
+const TABS = ['ask', 'calendar', 'plans', 'likes', 'ideas', 'week', 'activities', 'memories'];
 let tab = 'ask', cleanup = null, painting = false, archiveQuery = '', lastHtml = '';
 function route() {
   const h = location.hash.slice(1);
@@ -919,6 +919,66 @@ function bindActivities(v) {
   filter();
 }
 
+// ---- Likes & dislikes -------------------------------------------------------------
+// like:<id> {by, cat, kind: 'like'|'dislike', text, at}. Commit messages stay generic: the repo is public.
+const LIKE_CATS = { food: '🍜 Food', drinks: '🧋 Drinks', sports: '🏸 Sports', shows: '🎬 Movies & shows', music: '🎵 Music', places: '📍 Places', gifts: '🎁 Gifts', icks: '🙅 Icks', other: '✨ Other' };
+let likeWho = 'all', likeCat = 'all';
+function viewLikes() {
+  const who = likeWho === 'all' ? ['a', 'b'] : [likeWho];
+  const rows = S.all('like:').filter(x => who.includes(x.by)).sort((a, b) => a.at - b.at);
+  const cats = Object.keys(LIKE_CATS).filter(c => (likeCat === 'all' ? rows.some(x => x.cat === c) : c === likeCat));
+  const chip = (act, v, label, cur) => `<button class="chip" data-act="${act}" data-v="${v}" aria-pressed="${cur === v}">${esc(label)}</button>`;
+  const tags = list => `<div class="like-tags">${list.map(x => `<button class="like-tag ${x.kind}" data-act="like-edit" data-key="${esc(x.key)}">${esc(x.text)}</button>`).join('')}</div>`;
+  const block = (title, list) => (list.length ? `<h3 class="like-kind">${title}</h3>${tags(list)}` : '');
+  const person = (p, c) => {
+    const mine = rows.filter(x => x.by === p && x.cat === c);
+    return `<article class="card like-card">
+      <h3 class="like-who who-${p}">${esc(nameOf(p))}</h3>
+      ${!mine.length ? '<p class="muted small">Nothing yet.</p>' : c === 'icks' ? tags(mine) : block('Likes', mine.filter(x => x.kind === 'like')) + block('Dislikes', mine.filter(x => x.kind === 'dislike'))}
+    </article>`;
+  };
+  return `
+  <section class="likes">
+    <div class="section-head">
+      <div><h1>Likes &amp; dislikes</h1><p class="muted">What each of you loves, can’t stand and gets the ick from. Tap an item to change it.</p></div>
+      <div class="head-actions"><button class="btn primary" data-act="like-new">+ Add</button></div>
+    </div>
+    <div class="filters">
+      <div class="chips" role="group" aria-label="Person">${chip('like-who', 'all', 'Both', likeWho)}${chip('like-who', 'a', nameOf('a'), likeWho)}${chip('like-who', 'b', nameOf('b'), likeWho)}</div>
+      <div class="chips" role="group" aria-label="Category">${chip('like-cat', 'all', 'All', likeCat)}${Object.entries(LIKE_CATS).map(([k, l]) => chip('like-cat', k, l, likeCat)).join('')}</div>
+    </div>
+    ${cats.map(c => `<h2 class="col-title">${LIKE_CATS[c]}</h2><div class="like-grid">${who.map(p => person(p, c)).join('')}</div>`).join('') || '<p class="empty">Nothing here yet. Tap + Add to start.</p>'}
+  </section>`;
+}
+function likeForm(x) {
+  const opts = (map, cur) => Object.entries(map).map(([k, l]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
+  const m = openModal(`
+    <form class="form" id="likeForm">
+      <h2>${x.key ? 'Change this' : 'Add a like or dislike'}</h2>
+      <div class="row">
+        <label>Whose?<select name="by">${opts({ a: nameOf('a'), b: nameOf('b') }, x.by)}</select></label>
+        <label>Category<select name="cat">${opts(LIKE_CATS, x.cat)}</select></label>
+      </div>
+      <label id="likeKind">How they feel<select name="kind">${opts({ like: 'Likes', dislike: 'Dislikes' }, x.kind)}</select></label>
+      <label>What is it?<input name="text" maxlength="80" required value="${esc(x.text)}" placeholder="Nasi lemak, badminton, slow walkers…"></label>
+      <p class="small muted" id="likeSaved" role="status"></p>
+      <div class="actions">${x.key ? '<button type="button" class="btn ghost" id="likeDel">Remove</button>' : ''}<button type="button" class="btn ghost" data-close>${x.key ? 'Cancel' : 'Done'}</button><button class="btn primary">${x.key ? 'Save' : 'Add'}</button></div>
+    </form>`);
+  const f = $('#likeForm', m);
+  const sync = () => { $('#likeKind', m).hidden = f.cat.value === 'icks'; };
+  f.cat.onchange = sync; sync();
+  f.text.focus();
+  if (x.key) $('#likeDel', m).onclick = () => { S.remove(x.key, 'revert(likes): remove an item'); m.close(); toast('Removed'); };
+  f.onsubmit = e => {
+    e.preventDefault();
+    const text = f.text.value.trim(); if (!text) return;
+    S.put(x.key || 'like:' + S.uid(), { by: f.by.value, cat: f.cat.value, kind: f.cat.value === 'icks' ? 'dislike' : f.kind.value, text, at: x.at || Date.now() }, 'feat(likes): update likes');
+    if (x.key) return m.close();
+    f.text.value = ''; f.text.focus(); // stay open: people add these in runs
+    $('#likeSaved', m).textContent = `Added “${text}”. Add another, or tap Done.`;
+  };
+}
+
 // ---- Memories ---------------------------------------------------------------------
 function viewMemories() {
   const done = dates().filter(d => d.status === 'done').sort((a, b) => (b.date || '').localeCompare(a.date || ''));
@@ -1179,6 +1239,10 @@ $('#view').addEventListener('click', e => {
     'save-idea': () => { saveIdea(ideaFromRow(DATE_IDEAS[btn.dataset.i])); render(); },
     'save-act': () => { const a = ACTIVITY_GROUPS[btn.dataset.g].items[btn.dataset.i]; saveIdea({ emoji: a.e, title: a.name, notes: a.what, link: a.url }); render(); },
     'act-free': () => { actFree = !actFree; render(); },
+    'like-who': () => { likeWho = btn.dataset.v; render(); },
+    'like-cat': () => { likeCat = btn.dataset.v; render(); },
+    'like-new': () => likeForm({ by: likeWho === 'all' ? me() : likeWho, cat: likeCat === 'all' ? 'food' : likeCat, kind: 'like' }),
+    'like-edit': () => d && likeForm(d),
     'week-find': findWeek,
     'wo-open': () => { const el = $('#wo-' + btn.dataset.day); if (el) { el.open = true; el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' }); } },
     'week-day': () => { weekDaytime = !weekDaytime; render(); },
@@ -1807,7 +1871,7 @@ S.onChange(what => {
 });
 addEventListener('hashchange', () => setTimeout(noteAlert));
 addEventListener('hashchange', route);
-const VIEWS = { ask: viewAsk, calendar: viewCalendar, plans: viewPlans, ideas: viewIdeas, week: viewWeek, activities: viewActivities, memories: viewMemories };
+const VIEWS = { ask: viewAsk, calendar: viewCalendar, plans: viewPlans, likes: viewLikes, ideas: viewIdeas, week: viewWeek, activities: viewActivities, memories: viewMemories };
 const BIND = { ask: bindAsk, calendar: bindCalendar, ideas: bindIdeas, week: bindWeek, activities: bindActivities, memories: bindMemories };
 
 await S.init();

@@ -620,3 +620,16 @@ html.noscroll .ib-icon img { width: 34px; height: 34px; }
   .poop-show, .ps-card, .ps-poop, .ps-poop span, .ps-btns { animation: none !important; }
   .ps-stink { display: none; }
 }
+
+/* ---------- likes & dislikes ---------- */
+.likes { display: grid; gap: 14px; }
+.like-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 10px; }
+.like-card { gap: 8px; }
+.like-who { display: flex; align-items: center; gap: 7px; }
+.like-who::before { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--a); }
+.like-who.who-b::before { background: var(--b); }
+.like-kind { font-size: .78rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-top: 2px; }
+.like-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.like-tag { font: 500 14px var(--sans); min-height: 36px; padding: 6px 12px; border-radius: 18px; border: 1px solid; cursor: pointer; text-align: left; max-width: 100%; overflow-wrap: anywhere; }
+.like-tag.like { background: #e8f7ef; border-color: #b5e3cb; color: #1c6341; }
+.like-tag.dislike { background: #fdecec; border-color: #f4c4c4; color: #9c2b2b; }
